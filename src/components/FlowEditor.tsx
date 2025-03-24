@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, forwardRef, useImperativeHandle, useEffect } from 'react';
+import { useRef, useState, useCallback, forwardRef, useImperativeHandle, useEffect, useMemo } from 'react';
 import ReactFlow, {
   Node,
   Edge,
@@ -61,6 +61,17 @@ const getNodeStyle = (type: string) => {
 // Define the handle types we want to expose
 export interface FlowEditorHandle {
   handleSaveWorkflow: () => boolean;
+  loadWorkflow: (workflowId: string) => boolean;
+}
+
+interface SavedWorkflowData {
+  nodes: Node[];
+  edges: Edge[];
+  viewport?: {
+    x: number;
+    y: number;
+    zoom: number;
+  };
 }
 
 const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
@@ -68,30 +79,7 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
-
-  // Load saved flow if available and set horizontal orientation
-  useEffect(() => {
-    try {
-      const savedFlow = localStorage.getItem('savedFlow');
-      
-      if (savedFlow && reactFlowInstance) {
-        const flow = JSON.parse(savedFlow);
-        
-        // Update nodes with horizontal orientation
-        const nodesWithHorizontalFlow = flow.nodes.map((node: Node) => ({
-          ...node,
-          sourcePosition: Position.Right,
-          targetPosition: Position.Left,
-        }));
-        
-        // Set nodes and edges from saved state
-        setNodes(nodesWithHorizontalFlow || []);
-        setEdges(flow.edges || []);
-      }
-    } catch (error) {
-      console.error('Error loading saved flow:', error);
-    }
-  }, [reactFlowInstance, setNodes, setEdges]);
+  const [activeWorkflowId, setActiveWorkflowId] = useState<string | null>(null);
 
   // Apply horizontal orientation to any nodes
   const ensureHorizontalOrientation = useCallback((nodes: Node[]) => {
@@ -102,6 +90,63 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
     }));
   }, []);
 
+  // Load saved flow if available and set horizontal orientation
+  useEffect(() => {
+    try {
+      // On initial load, get the default workflow
+      const defaultWorkflowData = localStorage.getItem('workflow-1');
+      
+      if (defaultWorkflowData && reactFlowInstance) {
+        const flow = JSON.parse(defaultWorkflowData) as SavedWorkflowData;
+        
+        // Update nodes with horizontal orientation
+        const nodesWithHorizontalFlow = ensureHorizontalOrientation(flow.nodes || []);
+        
+        // Set nodes and edges from saved state
+        setNodes(nodesWithHorizontalFlow);
+        setEdges(flow.edges || []);
+        setActiveWorkflowId('workflow-1');
+      }
+    } catch (error) {
+      console.error('Error loading saved flow:', error);
+    }
+  }, [reactFlowInstance, setNodes, setEdges, ensureHorizontalOrientation]);
+
+  // Load workflow by ID
+  const loadWorkflow = useCallback((workflowId: string) => {
+    if (!reactFlowInstance) return false;
+    
+    try {
+      const savedWorkflowData = localStorage.getItem(workflowId);
+      
+      if (savedWorkflowData) {
+        const workflow = JSON.parse(savedWorkflowData) as SavedWorkflowData;
+        
+        // Update nodes with horizontal orientation
+        const nodesWithHorizontalFlow = ensureHorizontalOrientation(workflow.nodes || []);
+        
+        // Set nodes and edges
+        setNodes(nodesWithHorizontalFlow);
+        setEdges(workflow.edges || []);
+        setActiveWorkflowId(workflowId);
+        
+        // If there's viewport data, restore it
+        if (workflow.viewport) {
+          reactFlowInstance.setViewport(workflow.viewport);
+        } else {
+          // Otherwise fit the view to show all nodes
+          setTimeout(() => reactFlowInstance.fitView(), 50);
+        }
+        
+        return true;
+      }
+    } catch (error) {
+      console.error(`Error loading workflow ${workflowId}:`, error);
+    }
+    
+    return false;
+  }, [reactFlowInstance, setNodes, setEdges, ensureHorizontalOrientation]);
+
   // Handle saving the workflow
   const handleSaveWorkflow = useCallback(() => {
     if (reactFlowInstance) {
@@ -111,21 +156,27 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
       // Make sure all nodes have horizontal orientation before saving
       flowData.nodes = ensureHorizontalOrientation(flowData.nodes);
       
-      console.log('Saving flow data:', flowData);
+      // Create a workflow ID if none exists
+      const workflowId = activeWorkflowId || `workflow-${Date.now()}`;
       
-      // Store in localStorage for demo purposes
-      localStorage.setItem('savedFlow', JSON.stringify(flowData));
+      console.log(`Saving workflow ${workflowId}:`, flowData);
+      
+      // Store in localStorage by workflow ID
+      localStorage.setItem(workflowId, JSON.stringify(flowData));
+      setActiveWorkflowId(workflowId);
       
       return true;
     }
     return false;
-  }, [reactFlowInstance, ensureHorizontalOrientation]);
+  }, [reactFlowInstance, ensureHorizontalOrientation, activeWorkflowId]);
 
   // Expose methods to the parent component
   useImperativeHandle(ref, () => ({
-    handleSaveWorkflow
+    handleSaveWorkflow,
+    loadWorkflow
   }));
 
+  // Memoize React Flow props to prevent recreating objects on each render
   const onConnect = useCallback(
     (connection: Connection) => {
       setEdges((eds) => addEdge({
@@ -182,10 +233,20 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
     },
     [reactFlowInstance, setNodes]
   );
+  
+  // Memoize connectionLineStyle to prevent recreation on each render
+  const connectionLineStyle = useMemo(() => ({ stroke: '#64748B' }), []);
+  
+  // Memoize defaultViewport to prevent recreation on each render
+  const defaultViewport = useMemo(() => ({ x: 0, y: 0, zoom: 1.5 }), []);
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-      <ComponentsPanel onSaveWorkflow={handleSaveWorkflow} />
+      <ComponentsPanel 
+        onSaveWorkflow={handleSaveWorkflow} 
+        onLoadWorkflow={loadWorkflow}
+        activeWorkflowId={activeWorkflowId}
+      />
       <div 
         className="reactflow-wrapper" 
         ref={reactFlowWrapper} 
@@ -200,12 +261,12 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
           onInit={setReactFlowInstance}
           onDrop={onDrop}
           onDragOver={onDragOver}
-          defaultViewport={{ x: 0, y: 0, zoom: 1.5 }}
+          defaultViewport={defaultViewport}
           minZoom={0.5}
           maxZoom={4}
           defaultEdgeOptions={defaultEdgeOptions}
           connectionLineType={ConnectionLineType.SmoothStep}
-          connectionLineStyle={{ stroke: '#64748B' }}
+          connectionLineStyle={connectionLineStyle}
           fitView
         >
           <Controls position="bottom-right" />

@@ -7,7 +7,7 @@ import FlowEditor, { FlowEditorHandle } from "@/components/FlowEditor";
 import { Save, Share2 } from "lucide-react";
 
 export default function Home() {
-  // Create a ref to access the FlowEditor's save function
+  // Create a ref to access the FlowEditor's methods
   const flowEditorRef = useRef<FlowEditorHandle>(null);
 
   const handleSaveFlow = () => {

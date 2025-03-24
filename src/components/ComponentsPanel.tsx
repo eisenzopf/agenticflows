@@ -1,51 +1,15 @@
-import { useState } from 'react';
-import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Plus, Pencil, Copy, Trash2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Plus, Pencil, Copy, Trash2, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { api, ComponentItem, WorkflowData } from '@/services/api';
 
-// Define the component types
-interface ComponentItem {
-  id: string;
-  type: string;
-  label: string;
-}
-
+// Define the workflow type
 interface Workflow {
   id: string;
   name: string;
   date: string;
 }
-
-// Agent components sorted alphabetically
-const agentComponents: ComponentItem[] = [
-  { id: 'agent-assist', type: 'agent', label: 'Agent Assist' },
-  { id: 'analyzer', type: 'agent', label: 'Analyzer' },
-  { id: 'coach', type: 'agent', label: 'Coach' },
-  { id: 'evaluator', type: 'agent', label: 'Evaluator' },
-  { id: 'knowledge', type: 'agent', label: 'Knowledge' },
-  { id: 'observer', type: 'agent', label: 'Observer' },
-  { id: 'orchestrator', type: 'agent', label: 'Orchestrator' },
-  { id: 'planner', type: 'agent', label: 'Planner' },
-  { id: 'researcher', type: 'agent', label: 'Researcher' },
-  { id: 'superviser-assist', type: 'agent', label: 'Superviser Assist' },
-  { id: 'trainer', type: 'agent', label: 'Trainer' },
-];
-
-// Tool components sorted alphabetically
-const toolComponents: ComponentItem[] = [
-  { id: 'agent-guide', type: 'tool', label: 'Agent Guide' },
-  { id: 'agent-scorecard', type: 'tool', label: 'Agent Scorecard' },
-  { id: 'agent-training', type: 'tool', label: 'Agent Training' },
-  { id: 'call-observation', type: 'tool', label: 'Call Observation' },
-  { id: 'competitive-analysis', type: 'tool', label: 'Competitive Analysis' },
-  { id: 'goal-tracking', type: 'tool', label: 'Goal Tracking' },
-  { id: 'talent-builder', type: 'tool', label: 'Talent Builder' },
-];
-
-// Sample workflows
-const initialWorkflows: Workflow[] = [
-  { id: 'workflow-1', name: 'Default Workflow', date: new Date().toLocaleDateString() }
-];
 
 // Component card styling based on type
 const getComponentStyle = (type: string) => {
@@ -61,12 +25,22 @@ const getComponentStyle = (type: string) => {
 
 interface ComponentsPanelProps {
   onSaveWorkflow?: () => void;
+  onLoadWorkflow?: (workflowId: string) => boolean;
+  activeWorkflowId?: string | null;
 }
 
-export default function ComponentsPanel({ onSaveWorkflow }: ComponentsPanelProps) {
+export default function ComponentsPanel({ onSaveWorkflow, onLoadWorkflow, activeWorkflowId }: ComponentsPanelProps) {
   const [isExpanded, setIsExpanded] = useState(true);
-  const [workflows, setWorkflows] = useState<Workflow[]>(initialWorkflows);
-  const [activeWorkflow, setActiveWorkflow] = useState<string>(initialWorkflows[0].id);
+  const [agentComponents, setAgentComponents] = useState<ComponentItem[]>([]);
+  const [toolComponents, setToolComponents] = useState<ComponentItem[]>([]);
+  const [workflows, setWorkflows] = useState<Workflow[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [activeWorkflow, setActiveWorkflow] = useState<string>(activeWorkflowId || '');
+  
+  // Update activeWorkflow when activeWorkflowId changes from parent
+  if (activeWorkflowId && activeWorkflowId !== activeWorkflow) {
+    setActiveWorkflow(activeWorkflowId);
+  }
   
   // Expandable sections state
   const [sectionsExpanded, setSectionsExpanded] = useState({
@@ -74,6 +48,53 @@ export default function ComponentsPanel({ onSaveWorkflow }: ComponentsPanelProps
     agents: true,
     tools: true
   });
+
+  useEffect(() => {
+    // Fetch components when the component mounts
+    async function fetchData() {
+      setIsLoading(true);
+      try {
+        // Fetch components (agents and tools)
+        const componentsData = await api.getComponents();
+        setAgentComponents(componentsData.agents || []);
+        setToolComponents(componentsData.tools || []);
+        
+        // Fetch workflows
+        const workflowsData = await api.getWorkflows();
+        
+        if (workflowsData && workflowsData.length > 0) {
+          // Convert API response to expected workflow format
+          const formattedWorkflows = workflowsData.map(workflow => ({
+            id: workflow.id,
+            name: workflow.name,
+            date: workflow.date
+          }));
+          
+          setWorkflows(formattedWorkflows);
+          
+          // Set active workflow if none is selected
+          if (!activeWorkflow) {
+            setActiveWorkflow(formattedWorkflows[0].id);
+          }
+        } else {
+          // If no workflows exist, create a default one
+          const defaultWorkflow = {
+            id: `workflow-${Date.now()}`,
+            name: 'Default Workflow',
+            date: new Date().toLocaleDateString()
+          };
+          setWorkflows([defaultWorkflow]);
+          setActiveWorkflow(defaultWorkflow.id);
+        }
+      } catch (error) {
+        console.error("Error fetching components:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    
+    fetchData();
+  }, []);
 
   const toggleSection = (section: 'workflows' | 'agents' | 'tools') => {
     setSectionsExpanded(prev => ({
@@ -88,30 +109,45 @@ export default function ComponentsPanel({ onSaveWorkflow }: ComponentsPanelProps
     event.dataTransfer.effectAllowed = 'move';
   };
 
-  const handleAddWorkflow = () => {
+  const handleAddWorkflow = async () => {
     const newWorkflow: Workflow = {
       id: `workflow-${Date.now()}`,
       name: `New Workflow ${workflows.length + 1}`,
       date: new Date().toLocaleDateString()
     };
-    setWorkflows([...workflows, newWorkflow]);
-    setActiveWorkflow(newWorkflow.id);
+    
+    try {
+      // Create the workflow in the API
+      await api.createWorkflow({
+        ...newWorkflow,
+        nodes: [],
+        edges: []
+      });
+      
+      // Update local state
+      setWorkflows([...workflows, newWorkflow]);
+      setActiveWorkflow(newWorkflow.id);
+    } catch (error) {
+      console.error("Error creating workflow:", error);
+    }
   };
 
-  const handleSaveWorkflow = () => {
+  const handleSaveWorkflow = async () => {
     // This would typically save the current flow state
     if (onSaveWorkflow) {
       onSaveWorkflow();
     }
+    
     // For demo purposes, we'll just update the date
-    setWorkflows(workflows.map(wf => 
+    const updatedWorkflows = workflows.map(wf => 
       wf.id === activeWorkflow 
         ? { ...wf, date: new Date().toLocaleDateString() } 
         : wf
-    ));
+    );
+    setWorkflows(updatedWorkflows);
   };
 
-  const handleCloneWorkflow = (id: string) => {
+  const handleCloneWorkflow = async (id: string) => {
     const workflowToClone = workflows.find(wf => wf.id === id);
     if (workflowToClone) {
       const newWorkflow: Workflow = {
@@ -119,20 +155,56 @@ export default function ComponentsPanel({ onSaveWorkflow }: ComponentsPanelProps
         name: `${workflowToClone.name} (Copy)`,
         date: new Date().toLocaleDateString()
       };
-      setWorkflows([...workflows, newWorkflow]);
+      
+      try {
+        // Fetch the original workflow to get nodes and edges
+        const originalWorkflow = await api.getWorkflow(id);
+        
+        // Create a copy in the database
+        await api.createWorkflow({
+          ...newWorkflow,
+          nodes: originalWorkflow.nodes,
+          edges: originalWorkflow.edges
+        });
+        
+        // Update local state
+        setWorkflows([...workflows, newWorkflow]);
+      } catch (error) {
+        console.error("Error cloning workflow:", error);
+      }
     }
   };
 
-  const handleRenameWorkflow = (id: string) => {
+  const handleRenameWorkflow = async (id: string) => {
     const newName = prompt('Enter new workflow name:');
     if (newName && newName.trim() !== '') {
-      setWorkflows(workflows.map(wf => 
-        wf.id === id ? { ...wf, name: newName.trim() } : wf
-      ));
+      try {
+        // Find the workflow to update
+        const workflowToUpdate = workflows.find(wf => wf.id === id);
+        if (workflowToUpdate) {
+          // Get the full workflow data
+          const fullWorkflow = await api.getWorkflow(id);
+          
+          // Update the workflow in the API
+          const updatedWorkflow = {
+            ...fullWorkflow,
+            name: newName.trim()
+          };
+          
+          await api.updateWorkflow(id, updatedWorkflow);
+          
+          // Update local state
+          setWorkflows(workflows.map(wf => 
+            wf.id === id ? { ...wf, name: newName.trim() } : wf
+          ));
+        }
+      } catch (error) {
+        console.error("Error renaming workflow:", error);
+      }
     }
   };
 
-  const handleDeleteWorkflow = (id: string) => {
+  const handleDeleteWorkflow = async (id: string) => {
     if (workflows.length <= 1) {
       alert('Cannot delete the only workflow.');
       return;
@@ -140,15 +212,48 @@ export default function ComponentsPanel({ onSaveWorkflow }: ComponentsPanelProps
     
     const confirmed = confirm('Are you sure you want to delete this workflow?');
     if (confirmed) {
-      const newWorkflows = workflows.filter(wf => wf.id !== id);
-      setWorkflows(newWorkflows);
-      
-      // If the active workflow was deleted, select the first one
-      if (activeWorkflow === id) {
-        setActiveWorkflow(newWorkflows[0].id);
+      try {
+        // Delete the workflow from the API
+        await api.deleteWorkflow(id);
+        
+        // Update local state
+        const newWorkflows = workflows.filter(wf => wf.id !== id);
+        setWorkflows(newWorkflows);
+        
+        // If the active workflow was deleted, select the first one
+        if (activeWorkflow === id) {
+          setActiveWorkflow(newWorkflows[0].id);
+        }
+      } catch (error) {
+        console.error("Error deleting workflow:", error);
       }
     }
   };
+  
+  const handleWorkflowDoubleClick = (id: string) => {
+    if (onLoadWorkflow) {
+      const success = onLoadWorkflow(id);
+      if (success) {
+        setActiveWorkflow(id);
+      }
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="component-panel transition-all duration-300 bg-card border-r h-full flex flex-col w-64">
+        <div className="flex justify-between items-center p-2 border-b">
+          <span className="font-medium">Components</span>
+          <Button variant="ghost" size="sm" className="ml-auto">
+            <ChevronLeft size={16} />
+          </Button>
+        </div>
+        <div className="p-4 text-center">
+          Loading components...
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div 
@@ -185,6 +290,7 @@ export default function ComponentsPanel({ onSaveWorkflow }: ComponentsPanelProps
                     handleAddWorkflow();
                   }}
                   className="h-6 w-6 p-0 mr-1"
+                  title="Add new workflow"
                 >
                   <Plus size={14} />
                 </Button>
@@ -196,8 +302,9 @@ export default function ComponentsPanel({ onSaveWorkflow }: ComponentsPanelProps
                     handleSaveWorkflow();
                   }}
                   className="h-6 w-6 p-0 mr-1"
+                  title="Save current workflow"
                 >
-                  <Plus size={0} /> {/* Placeholder to maintain spacing */}
+                  <Save size={14} />
                 </Button>
                 {sectionsExpanded.workflows ? (
                   <ChevronUp size={16} className="text-muted-foreground" />
@@ -213,11 +320,13 @@ export default function ComponentsPanel({ onSaveWorkflow }: ComponentsPanelProps
                   <div
                     key={workflow.id}
                     onClick={() => setActiveWorkflow(workflow.id)}
+                    onDoubleClick={() => handleWorkflowDoubleClick(workflow.id)}
                     className={`p-2 rounded text-sm flex items-center justify-between group cursor-pointer ${
                       activeWorkflow === workflow.id 
                         ? 'bg-purple-100 dark:bg-purple-900/30 border-l-4 border-l-purple-400 dark:border-l-purple-600' 
                         : 'hover:bg-purple-50 dark:hover:bg-purple-900/10'
                     }`}
+                    title="Double-click to load this workflow"
                   >
                     <div className="overflow-hidden">
                       <div className="font-medium truncate">{workflow.name}</div>
@@ -233,6 +342,7 @@ export default function ComponentsPanel({ onSaveWorkflow }: ComponentsPanelProps
                           handleRenameWorkflow(workflow.id);
                         }}
                         className="h-6 w-6 p-0"
+                        title="Rename workflow"
                       >
                         <Pencil size={12} />
                       </Button>
@@ -244,6 +354,7 @@ export default function ComponentsPanel({ onSaveWorkflow }: ComponentsPanelProps
                           handleCloneWorkflow(workflow.id);
                         }}
                         className="h-6 w-6 p-0"
+                        title="Clone workflow"
                       >
                         <Copy size={12} />
                       </Button>
@@ -255,6 +366,7 @@ export default function ComponentsPanel({ onSaveWorkflow }: ComponentsPanelProps
                           handleDeleteWorkflow(workflow.id);
                         }}
                         className="h-6 w-6 p-0"
+                        title="Delete workflow"
                       >
                         <Trash2 size={12} />
                       </Button>
