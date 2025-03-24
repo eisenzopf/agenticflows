@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback } from 'react';
+import { useRef, useState, useCallback, forwardRef, useImperativeHandle, useEffect } from 'react';
 import ReactFlow, {
   Node,
   Edge,
@@ -11,6 +11,8 @@ import ReactFlow, {
   useEdgesState,
   ReactFlowInstance,
   XYPosition,
+  ConnectionLineType,
+  Position,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import ComponentsPanel from './ComponentsPanel';
@@ -18,6 +20,13 @@ import ComponentsPanel from './ComponentsPanel';
 // Start with an empty canvas
 const initialNodes: Node[] = [];
 const initialEdges: Edge[] = [];
+
+// Default edge options for horizontal flow
+const defaultEdgeOptions = {
+  type: 'smoothstep', 
+  animated: true,
+  style: { stroke: '#64748B' },
+};
 
 // Node types based on component type
 const getNodeStyle = (type: string) => {
@@ -49,16 +58,79 @@ const getNodeStyle = (type: string) => {
   }
 };
 
-export default function FlowEditor() {
+// Define the handle types we want to expose
+export interface FlowEditorHandle {
+  handleSaveWorkflow: () => boolean;
+}
+
+const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
 
+  // Load saved flow if available and set horizontal orientation
+  useEffect(() => {
+    try {
+      const savedFlow = localStorage.getItem('savedFlow');
+      
+      if (savedFlow && reactFlowInstance) {
+        const flow = JSON.parse(savedFlow);
+        
+        // Update nodes with horizontal orientation
+        const nodesWithHorizontalFlow = flow.nodes.map((node: Node) => ({
+          ...node,
+          sourcePosition: Position.Right,
+          targetPosition: Position.Left,
+        }));
+        
+        // Set nodes and edges from saved state
+        setNodes(nodesWithHorizontalFlow || []);
+        setEdges(flow.edges || []);
+      }
+    } catch (error) {
+      console.error('Error loading saved flow:', error);
+    }
+  }, [reactFlowInstance, setNodes, setEdges]);
+
+  // Apply horizontal orientation to any nodes
+  const ensureHorizontalOrientation = useCallback((nodes: Node[]) => {
+    return nodes.map(node => ({
+      ...node,
+      sourcePosition: Position.Right,
+      targetPosition: Position.Left,
+    }));
+  }, []);
+
+  // Handle saving the workflow
+  const handleSaveWorkflow = useCallback(() => {
+    if (reactFlowInstance) {
+      // Get current flow state
+      const flowData = reactFlowInstance.toObject();
+      
+      // Make sure all nodes have horizontal orientation before saving
+      flowData.nodes = ensureHorizontalOrientation(flowData.nodes);
+      
+      console.log('Saving flow data:', flowData);
+      
+      // Store in localStorage for demo purposes
+      localStorage.setItem('savedFlow', JSON.stringify(flowData));
+      
+      return true;
+    }
+    return false;
+  }, [reactFlowInstance, ensureHorizontalOrientation]);
+
+  // Expose methods to the parent component
+  useImperativeHandle(ref, () => ({
+    handleSaveWorkflow
+  }));
+
   const onConnect = useCallback(
     (connection: Connection) => {
       setEdges((eds) => addEdge({
-        ...connection, 
+        ...connection,
+        type: 'smoothstep',
         animated: true,
         style: { stroke: '#64748B' }
       }, eds));
@@ -98,6 +170,9 @@ export default function FlowEditor() {
           position,
           data: { label },
           style: getNodeStyle(type),
+          // Set source handles on the right, target handles on the left for horizontal flow
+          sourcePosition: Position.Right,
+          targetPosition: Position.Left,
         };
 
         setNodes((nds) => nds.concat(newNode));
@@ -110,7 +185,7 @@ export default function FlowEditor() {
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-      <ComponentsPanel />
+      <ComponentsPanel onSaveWorkflow={handleSaveWorkflow} />
       <div 
         className="reactflow-wrapper" 
         ref={reactFlowWrapper} 
@@ -128,6 +203,10 @@ export default function FlowEditor() {
           defaultViewport={{ x: 0, y: 0, zoom: 1.5 }}
           minZoom={0.5}
           maxZoom={4}
+          defaultEdgeOptions={defaultEdgeOptions}
+          connectionLineType={ConnectionLineType.SmoothStep}
+          connectionLineStyle={{ stroke: '#64748B' }}
+          fitView
         >
           <Controls position="bottom-right" />
           <MiniMap 
@@ -140,4 +219,8 @@ export default function FlowEditor() {
       </div>
     </div>
   );
-} 
+});
+
+FlowEditor.displayName = 'FlowEditor';
+
+export default FlowEditor; 
