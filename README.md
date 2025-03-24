@@ -1,22 +1,76 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Agent Flow Designer
+
+A Next.js application for designing and connecting components using a visual flow editor.
+
+## Tech Stack
+
+### Frontend
+- Next.js with TypeScript
+- React
+- ReactFlow for flow visualization and manipulation
+- shadcn/ui for UI components
+- Lucide icons
+
+### Backend
+- Go services
+- RESTful API
 
 ## Getting Started
 
-First, run the development server:
+### Prerequisites
 
+- Node.js (v18+)
+- npm
+- Go (v1.21+) - for backend services
+
+### Installation
+
+1. Clone the repository
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+git clone https://github.com/yourusername/agenticflows.git
+cd agenticflows
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. Install frontend dependencies
+```bash
+npm install
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+3. Start the development server
+```bash
+npm run dev
+```
+
+4. Set up the Go backend (requires Go to be installed)
+```bash
+cd backend
+go mod tidy
+go run api/main.go
+```
+
+## Development
+
+### Frontend
+
+The application is structured as follows:
+- `src/components/FlowEditor.tsx` - Main component for ReactFlow integration
+- `src/services/api.ts` - API service for interacting with the backend
+- `src/app/page.tsx` - Main page layout
+
+### Backend
+
+The Go backend provides a simple API for managing flows:
+- GET `/api/flows` - Get all flows
+- POST `/api/flows` - Create a new flow
+- GET `/api/flows/:id` - Get a specific flow
+- PUT `/api/flows/:id` - Update a flow
+- DELETE `/api/flows/:id` - Delete a flow
+
+## Features
+
+- Visual flow editor for connecting components
+- Saving and loading flow configurations
+- RESTful API for managing flows
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
