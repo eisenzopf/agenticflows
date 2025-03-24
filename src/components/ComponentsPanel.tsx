@@ -24,8 +24,8 @@ const getComponentStyle = (type: string) => {
 };
 
 interface ComponentsPanelProps {
-  onSaveWorkflow?: () => void;
-  onLoadWorkflow?: (workflowId: string) => boolean;
+  onSaveWorkflow?: () => Promise<boolean>;
+  onLoadWorkflow?: (workflowId: string) => Promise<boolean>;
   activeWorkflowId?: string | null;
 }
 
@@ -110,14 +110,14 @@ export default function ComponentsPanel({ onSaveWorkflow, onLoadWorkflow, active
   };
 
   const handleAddWorkflow = async () => {
-    const newWorkflow: Workflow = {
+    const newWorkflow = {
       id: `workflow-${Date.now()}`,
       name: `New Workflow ${workflows.length + 1}`,
       date: new Date().toLocaleDateString()
     };
     
     try {
-      // Create the workflow in the API
+      // Create the workflow in the API with empty nodes and edges
       await api.createWorkflow({
         ...newWorkflow,
         nodes: [],
@@ -127,6 +127,11 @@ export default function ComponentsPanel({ onSaveWorkflow, onLoadWorkflow, active
       // Update local state
       setWorkflows([...workflows, newWorkflow]);
       setActiveWorkflow(newWorkflow.id);
+      
+      // Load the empty workflow if load function exists
+      if (onLoadWorkflow) {
+        await onLoadWorkflow(newWorkflow.id);
+      }
     } catch (error) {
       console.error("Error creating workflow:", error);
     }
@@ -135,7 +140,7 @@ export default function ComponentsPanel({ onSaveWorkflow, onLoadWorkflow, active
   const handleSaveWorkflow = async () => {
     // This would typically save the current flow state
     if (onSaveWorkflow) {
-      onSaveWorkflow();
+      await onSaveWorkflow();
     }
     
     // For demo purposes, we'll just update the date
@@ -230,11 +235,15 @@ export default function ComponentsPanel({ onSaveWorkflow, onLoadWorkflow, active
     }
   };
   
-  const handleWorkflowDoubleClick = (id: string) => {
+  const handleWorkflowDoubleClick = async (id: string) => {
     if (onLoadWorkflow) {
-      const success = onLoadWorkflow(id);
-      if (success) {
-        setActiveWorkflow(id);
+      try {
+        const success = await onLoadWorkflow(id);
+        if (success) {
+          setActiveWorkflow(id);
+        }
+      } catch (error) {
+        console.error("Error loading workflow:", error);
       }
     }
   };

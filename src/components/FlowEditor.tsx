@@ -16,6 +16,7 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import ComponentsPanel from './ComponentsPanel';
+import { api } from '@/services/api';
 
 // Start with an empty canvas
 const initialNodes: Node[] = [];
@@ -60,8 +61,8 @@ const getNodeStyle = (type: string) => {
 
 // Define the handle types we want to expose
 export interface FlowEditorHandle {
-  handleSaveWorkflow: () => boolean;
-  loadWorkflow: (workflowId: string) => boolean;
+  handleSaveWorkflow: () => Promise<boolean>;
+  loadWorkflow: (workflowId: string) => Promise<boolean>;
 }
 
 interface SavedWorkflowData {
@@ -80,6 +81,7 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [activeWorkflowId, setActiveWorkflowId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
   // Apply horizontal orientation to any nodes
   const ensureHorizontalOrientation = useCallback((nodes: Node[]) => {
@@ -90,84 +92,134 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
     }));
   }, []);
 
-  // Load saved flow if available and set horizontal orientation
+  // Load initial workflows from backend when component mounts
   useEffect(() => {
-    try {
-      // On initial load, get the default workflow
-      const defaultWorkflowData = localStorage.getItem('workflow-1');
+    const fetchInitialWorkflow = async () => {
+      if (!reactFlowInstance) return;
       
-      if (defaultWorkflowData && reactFlowInstance) {
-        const flow = JSON.parse(defaultWorkflowData) as SavedWorkflowData;
+      try {
+        setIsLoading(true);
+        // Fetch all workflows
+        const workflows = await api.getWorkflows();
         
-        // Update nodes with horizontal orientation
-        const nodesWithHorizontalFlow = ensureHorizontalOrientation(flow.nodes || []);
-        
-        // Set nodes and edges from saved state
-        setNodes(nodesWithHorizontalFlow);
-        setEdges(flow.edges || []);
-        setActiveWorkflowId('workflow-1');
+        // If there are workflows, load the first one
+        if (workflows && workflows.length > 0) {
+          const firstWorkflow = workflows[0];
+          await loadWorkflow(firstWorkflow.id);
+        } else {
+          // Start with an empty canvas if no workflows exist
+          setNodes([]);
+          setEdges([]);
+        }
+      } catch (error) {
+        console.error('Error loading initial workflow:', error);
+        // Start with an empty canvas on error
+        setNodes([]);
+        setEdges([]);
+      } finally {
+        setIsLoading(false);
       }
-    } catch (error) {
-      console.error('Error loading saved flow:', error);
-    }
-  }, [reactFlowInstance, setNodes, setEdges, ensureHorizontalOrientation]);
+    };
+    
+    fetchInitialWorkflow();
+  }, [reactFlowInstance]);
 
-  // Load workflow by ID
-  const loadWorkflow = useCallback((workflowId: string) => {
+  // Load workflow by ID from the backend API
+  const loadWorkflow = useCallback(async (workflowId: string) => {
     if (!reactFlowInstance) return false;
+    setIsLoading(true);
     
     try {
-      const savedWorkflowData = localStorage.getItem(workflowId);
+      // Fetch workflow from the backend API
+      const workflow = await api.getWorkflow(workflowId);
       
-      if (savedWorkflowData) {
-        const workflow = JSON.parse(savedWorkflowData) as SavedWorkflowData;
+      if (workflow) {
+        // Parse nodes and edges if they're strings
+        const parsedNodes = Array.isArray(workflow.nodes) 
+          ? workflow.nodes 
+          : (typeof workflow.nodes === 'string' ? JSON.parse(workflow.nodes) : []);
+          
+        const parsedEdges = Array.isArray(workflow.edges) 
+          ? workflow.edges 
+          : (typeof workflow.edges === 'string' ? JSON.parse(workflow.edges) : []);
         
         // Update nodes with horizontal orientation
-        const nodesWithHorizontalFlow = ensureHorizontalOrientation(workflow.nodes || []);
+        const nodesWithHorizontalFlow = ensureHorizontalOrientation(parsedNodes || []);
         
         // Set nodes and edges
         setNodes(nodesWithHorizontalFlow);
-        setEdges(workflow.edges || []);
+        setEdges(parsedEdges || []);
         setActiveWorkflowId(workflowId);
         
-        // If there's viewport data, restore it
-        if (workflow.viewport) {
-          reactFlowInstance.setViewport(workflow.viewport);
-        } else {
-          // Otherwise fit the view to show all nodes
-          setTimeout(() => reactFlowInstance.fitView(), 50);
-        }
+        // Fit the view to show all nodes
+        setTimeout(() => reactFlowInstance.fitView(), 50);
         
         return true;
       }
+      return false;
     } catch (error) {
       console.error(`Error loading workflow ${workflowId}:`, error);
+      return false;
+    } finally {
+      setIsLoading(false);
     }
-    
-    return false;
   }, [reactFlowInstance, setNodes, setEdges, ensureHorizontalOrientation]);
 
-  // Handle saving the workflow
-  const handleSaveWorkflow = useCallback(() => {
-    if (reactFlowInstance) {
+  // Handle saving the workflow to the backend API
+  const handleSaveWorkflow = useCallback(async () => {
+    if (!reactFlowInstance) return false;
+    setIsLoading(true);
+    
+    try {
       // Get current flow state
       const flowData = reactFlowInstance.toObject();
       
       // Make sure all nodes have horizontal orientation before saving
       flowData.nodes = ensureHorizontalOrientation(flowData.nodes);
       
-      // Create a workflow ID if none exists
-      const workflowId = activeWorkflowId || `workflow-${Date.now()}`;
+      const currentDate = new Date().toLocaleDateString();
       
-      console.log(`Saving workflow ${workflowId}:`, flowData);
+      if (activeWorkflowId) {
+        // Update existing workflow
+        try {
+          // Get the current workflow data first
+          const existingWorkflow = await api.getWorkflow(activeWorkflowId);
+          
+          // Update the workflow with new nodes and edges
+          await api.updateWorkflow(activeWorkflowId, {
+            ...existingWorkflow,
+            nodes: flowData.nodes,
+            edges: flowData.edges,
+            date: currentDate
+          });
+          
+          console.log(`Updated workflow ${activeWorkflowId}`);
+          return true;
+        } catch (error) {
+          // If the workflow doesn't exist yet, create a new one
+          console.log("Workflow not found, creating new one");
+        }
+      }
       
-      // Store in localStorage by workflow ID
-      localStorage.setItem(workflowId, JSON.stringify(flowData));
-      setActiveWorkflowId(workflowId);
+      // Create a new workflow if no active ID or update failed
+      const newWorkflowId = activeWorkflowId || `workflow-${Date.now()}`;
+      await api.createWorkflow({
+        id: newWorkflowId,
+        name: `Workflow ${new Date().toLocaleTimeString()}`,
+        date: currentDate,
+        nodes: flowData.nodes,
+        edges: flowData.edges
+      });
       
+      setActiveWorkflowId(newWorkflowId);
+      console.log(`Created new workflow ${newWorkflowId}`);
       return true;
+    } catch (error) {
+      console.error('Error saving workflow:', error);
+      return false;
+    } finally {
+      setIsLoading(false);
     }
-    return false;
   }, [reactFlowInstance, ensureHorizontalOrientation, activeWorkflowId]);
 
   // Expose methods to the parent component
