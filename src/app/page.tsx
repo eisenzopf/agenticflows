@@ -7,18 +7,16 @@ import { Plus, Save, Share2 } from "lucide-react";
 
 export default function Home() {
   return (
-    <div className="min-h-screen p-4">
-      <header className="container mx-auto py-4 border-b mb-4">
-        <h1 className="text-2xl font-bold">Agent Flow Designer</h1>
+    <div className="min-h-screen flex flex-col overflow-hidden">
+      <header className="px-4 py-4 border-b">
+        <div className="container mx-auto">
+          <h1 className="text-2xl font-bold">Agent Flow Designer</h1>
+        </div>
       </header>
 
-      <main className="container mx-auto">
-        <div className="flex justify-between mb-4">
+      <div className="px-4 py-2 border-b">
+        <div className="container mx-auto flex justify-between">
           <div className="flex gap-2">
-            <Button variant="outline" size="sm">
-              <Plus className="h-4 w-4 mr-2" />
-              New Component
-            </Button>
             <Button variant="outline" size="sm">
               <Save className="h-4 w-4 mr-2" />
               Save Flow
@@ -29,12 +27,11 @@ export default function Home() {
             Share
           </Button>
         </div>
+      </div>
 
-        <Card className="mb-4">
-          <CardHeader>
-            <CardTitle>Flow Editor</CardTitle>
-          </CardHeader>
-          <CardContent>
+      <main className="flex-grow">
+        <Card className="h-full rounded-none border-0">
+          <CardContent className="p-0 h-[calc(100vh-124px)]">
             <FlowEditor />
           </CardContent>
         </Card>

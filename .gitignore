@@ -14,8 +14,12 @@
 /coverage
 
 # next.js
-/.next/
-/out/
+node_modules/
+.next/
+out/
+build/
+dist/
+.turbo
 
 # production
 /build
@@ -31,7 +35,11 @@ yarn-error.log*
 .pnpm-debug.log*
 
 # env files (can opt-in for committing if needed)
-.env*
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 
 # vercel
 .vercel
@@ -39,3 +47,34 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+
+# Go
+/backend/bin/
+/backend/pkg/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+
+# Logs
+logs
+*.log
+
+# Coverage
+.nyc_output/
+
+# Dependency directories
+vendor/
