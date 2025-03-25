@@ -10,12 +10,12 @@ export default function Home() {
   // Create a ref to access the FlowEditor's methods
   const flowEditorRef = useRef<FlowEditorHandle>(null);
 
-  const handleSaveFlow = () => {
+  const handleSaveFlow = async () => {
     if (flowEditorRef.current) {
-      const saved = flowEditorRef.current.handleSaveWorkflow();
-      if (saved) {
-        // Show success notification
-        alert("Workflow saved successfully!");
+      const result = await flowEditorRef.current.handleSaveWorkflow();
+      if (result.success) {
+        // Show success notification with workflow name
+        alert(`"${result.workflowName}" saved successfully!`);
       }
     }
   };

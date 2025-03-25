@@ -24,7 +24,7 @@ const getComponentStyle = (type: string) => {
 };
 
 interface ComponentsPanelProps {
-  onSaveWorkflow?: () => Promise<boolean>;
+  onSaveWorkflow?: () => Promise<{success: boolean, workflowName: string}>;
   onLoadWorkflow?: (workflowId: string) => Promise<boolean>;
   activeWorkflowId?: string | null;
 }
@@ -128,6 +128,9 @@ export default function ComponentsPanel({ onSaveWorkflow, onLoadWorkflow, active
       setWorkflows([...workflows, newWorkflow]);
       setActiveWorkflow(newWorkflow.id);
       
+      // Notify user of successful creation
+      alert(`"${newWorkflow.name}" created successfully`);
+      
       // Load the empty workflow if load function exists
       if (onLoadWorkflow) {
         await onLoadWorkflow(newWorkflow.id);
@@ -140,7 +143,15 @@ export default function ComponentsPanel({ onSaveWorkflow, onLoadWorkflow, active
   const handleSaveWorkflow = async () => {
     // This would typically save the current flow state
     if (onSaveWorkflow) {
-      await onSaveWorkflow();
+      const result = await onSaveWorkflow();
+      
+      if (result.success) {
+        // If the save was successful and returned a name, use it
+        const workflowName = result.workflowName || 'Current workflow';
+        
+        // Update UI with notification (you might want to use a toast notification library in a real app)
+        alert(`${workflowName} saved successfully`);
+      }
     }
     
     // For demo purposes, we'll just update the date
@@ -174,6 +185,9 @@ export default function ComponentsPanel({ onSaveWorkflow, onLoadWorkflow, active
         
         // Update local state
         setWorkflows([...workflows, newWorkflow]);
+        
+        // Notify user of successful clone
+        alert(`"${workflowToClone.name}" cloned successfully as "${newWorkflow.name}"`);
       } catch (error) {
         console.error("Error cloning workflow:", error);
       }
@@ -181,7 +195,11 @@ export default function ComponentsPanel({ onSaveWorkflow, onLoadWorkflow, active
   };
 
   const handleRenameWorkflow = async (id: string) => {
-    const newName = prompt('Enter new workflow name:');
+    // Find current workflow name before renaming
+    const workflowToRename = workflows.find(wf => wf.id === id);
+    const oldName = workflowToRename?.name || '';
+    
+    const newName = prompt('Enter new workflow name:', oldName);
     if (newName && newName.trim() !== '') {
       try {
         // Find the workflow to update
@@ -202,6 +220,9 @@ export default function ComponentsPanel({ onSaveWorkflow, onLoadWorkflow, active
           setWorkflows(workflows.map(wf => 
             wf.id === id ? { ...wf, name: newName.trim() } : wf
           ));
+          
+          // Notify user of successful rename
+          alert(`Workflow renamed from "${oldName}" to "${newName.trim()}"`);
         }
       } catch (error) {
         console.error("Error renaming workflow:", error);
@@ -215,7 +236,11 @@ export default function ComponentsPanel({ onSaveWorkflow, onLoadWorkflow, active
       return;
     }
     
-    const confirmed = confirm('Are you sure you want to delete this workflow?');
+    // Find the workflow name before deleting
+    const workflowToDelete = workflows.find(wf => wf.id === id);
+    const workflowName = workflowToDelete?.name || 'Selected workflow';
+    
+    const confirmed = confirm(`Are you sure you want to delete "${workflowName}"?`);
     if (confirmed) {
       try {
         // Delete the workflow from the API
@@ -224,6 +249,9 @@ export default function ComponentsPanel({ onSaveWorkflow, onLoadWorkflow, active
         // Update local state
         const newWorkflows = workflows.filter(wf => wf.id !== id);
         setWorkflows(newWorkflows);
+        
+        // Show confirmation message
+        alert(`"${workflowName}" was deleted successfully`);
         
         // If the active workflow was deleted, select the first one
         if (activeWorkflow === id) {

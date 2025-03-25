@@ -61,7 +61,7 @@ const getNodeStyle = (type: string) => {
 
 // Define the handle types we want to expose
 export interface FlowEditorHandle {
-  handleSaveWorkflow: () => Promise<boolean>;
+  handleSaveWorkflow: () => Promise<{success: boolean, workflowName: string}>;
   loadWorkflow: (workflowId: string) => Promise<boolean>;
 }
 
@@ -151,8 +151,9 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
         setEdges(parsedEdges || []);
         setActiveWorkflowId(workflowId);
         
-        // Fit the view to show all nodes
-        setTimeout(() => reactFlowInstance.fitView(), 50);
+        // Apply consistent zoom level and fit view
+        reactFlowInstance.setViewport({ x: 0, y: 0, zoom: 0.8 });
+        setTimeout(() => reactFlowInstance.fitView({ padding: 0.4 }), 50);
         
         return true;
       }
@@ -167,7 +168,7 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
 
   // Handle saving the workflow to the backend API
   const handleSaveWorkflow = useCallback(async () => {
-    if (!reactFlowInstance) return false;
+    if (!reactFlowInstance) return {success: false, workflowName: ''};
     setIsLoading(true);
     
     try {
@@ -178,12 +179,14 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
       flowData.nodes = ensureHorizontalOrientation(flowData.nodes);
       
       const currentDate = new Date().toLocaleDateString();
+      let workflowName = '';
       
       if (activeWorkflowId) {
         // Update existing workflow
         try {
           // Get the current workflow data first
           const existingWorkflow = await api.getWorkflow(activeWorkflowId);
+          workflowName = existingWorkflow.name;
           
           // Update the workflow with new nodes and edges
           await api.updateWorkflow(activeWorkflowId, {
@@ -194,7 +197,7 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
           });
           
           console.log(`Updated workflow ${activeWorkflowId}`);
-          return true;
+          return {success: true, workflowName};
         } catch (error) {
           // If the workflow doesn't exist yet, create a new one
           console.log("Workflow not found, creating new one");
@@ -203,9 +206,11 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
       
       // Create a new workflow if no active ID or update failed
       const newWorkflowId = activeWorkflowId || `workflow-${Date.now()}`;
+      workflowName = `Workflow ${new Date().toLocaleTimeString()}`;
+      
       await api.createWorkflow({
         id: newWorkflowId,
-        name: `Workflow ${new Date().toLocaleTimeString()}`,
+        name: workflowName,
         date: currentDate,
         nodes: flowData.nodes,
         edges: flowData.edges
@@ -213,10 +218,10 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
       
       setActiveWorkflowId(newWorkflowId);
       console.log(`Created new workflow ${newWorkflowId}`);
-      return true;
+      return {success: true, workflowName};
     } catch (error) {
       console.error('Error saving workflow:', error);
-      return false;
+      return {success: false, workflowName: ''};
     } finally {
       setIsLoading(false);
     }
@@ -290,7 +295,7 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
   const connectionLineStyle = useMemo(() => ({ stroke: '#64748B' }), []);
   
   // Memoize defaultViewport to prevent recreation on each render
-  const defaultViewport = useMemo(() => ({ x: 0, y: 0, zoom: 1.5 }), []);
+  const defaultViewport = useMemo(() => ({ x: 0, y: 0, zoom: 0.8 }), []);
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
