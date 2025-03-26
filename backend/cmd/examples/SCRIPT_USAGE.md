@@ -19,19 +19,19 @@ This will run all the example scripts using the provided database, generating ou
 
 ## Options
 
-| Option | Description | Default |
-|--------|-------------|---------|
-| `-d, --database PATH` | Path to SQLite database (**required**) | - |
-| `-o, --output DIR` | Directory for output files | `./output` |
-| `-w, --workflow ID` | Workflow ID | Generated timestamp |
-| `-l, --limit NUM` | Limit number of items to process | 10 |
-| `-s, --sample NUM` | Sample size for conversation analysis | 3 |
-| `-m, --min-count NUM` | Minimum count threshold | 5 |
-| `-t, --target CLASS` | Target class for analysis | "fee dispute" |
-| `-i, --intents LIST` | Comma-separated list of intents | "cancel,upgrade,billing" |
-| `-c, --confidence NUM` | Confidence threshold | 0.7 |
-| `-v, --verbose` | Enable verbose/debug output | false |
-| `-h, --help` | Show usage information | - |
+| Option | Description | Default | API Parameter |
+|--------|-------------|---------|--------------|
+| `-d, --database PATH` | Path to SQLite database (**required**) | - | N/A |
+| `-o, --output DIR` | Directory for output files | `./output` | N/A |
+| `-w, --workflow ID` | Workflow ID | Generated timestamp | `workflow_id` |
+| `-l, --limit NUM` | Limit number of items to process | 10 | N/A |
+| `-s, --sample NUM` | Sample size for conversation analysis | 3 | N/A |
+| `-m, --min-count NUM` | Minimum count threshold | 5 | Used in pattern filtering |
+| `-t, --target CLASS` | Target class for analysis | "fee dispute" | `intent` |
+| `-i, --intents LIST` | Comma-separated list of intents | "cancel,upgrade,billing" | Used in matching |
+| `-c, --confidence NUM` | Confidence threshold | 0.7 | Used in intent filtering |
+| `-v, --verbose` | Enable verbose/debug output | false | N/A |
+| `-h, --help` | Show usage information | - | N/A |
 
 ## Available Scripts
 
@@ -42,13 +42,13 @@ Instead of running all scripts, you can run individual ones:
 ```
 
 Available script names:
-- `all` - Run all scripts
-- `generate_intents` - Generate conversation intents
-- `generate_attributes` - Generate attribute values for conversations
-- `group_intents` - Group similar intents together
-- `identify_attributes` - Identify attribute definitions for conversations
-- `match_intents` - Match and evaluate intent classifications
-- `analyze_fee_disputes` - Analyze fee dispute conversations
+- `all` - Run all scripts in sequence
+- `generate_intents` - Generate conversation intents (uses `/api/analysis/intent`)
+- `generate_attributes` - Generate attribute values for conversations (uses `/api/analysis/attributes`)
+- `group_intents` - Group similar intents together (uses `/api/analysis/patterns`)
+- `identify_attributes` - Identify attribute definitions for conversations (uses `/api/analysis/attributes`)
+- `match_intents` - Match and evaluate intent classifications (uses `/api/analysis/intent`)
+- `analyze_fee_disputes` - Analyze fee dispute conversations (uses multiple endpoints)
 
 ## Examples
 
@@ -90,4 +90,17 @@ Example output structure:
   ├── attribute_definitions_20230515123245.json
   ├── intent_matching_20230515123318.json
   └── fee_dispute_analysis_20230515123402.json
-``` 
+```
+
+## Script to API Mapping
+
+The scripts interact with the API server through the following endpoints:
+
+1. `generate_intents.go` → `/api/analysis/intent`
+2. `generate_attributes.go` → `/api/analysis/attributes`
+3. `group_intents.go` → `/api/analysis/patterns` and others
+4. `identify_attributes.go` → `/api/analysis/attributes` with `generate_required` flag
+5. `match_intents.go` → `/api/analysis/intent`
+6. `analyze_fee_disputes.go` → Multiple endpoints (`/api/analysis/attributes`, `/api/analysis/trends`, `/api/analysis/findings`)
+
+The command-line options from this script are passed to the individual scripts and ultimately mapped to API request parameters in each script's implementation. 

@@ -84,6 +84,7 @@ run_test() {
     # Make the API request
     local response=$(curl -s -X POST \
         -H "Content-Type: application/json" \
+        -H "X-Workflow-ID: $WORKFLOW_ID" \
         -d "$payload" \
         "${API_HOST}${endpoint}")
     
@@ -119,27 +120,27 @@ run_tests() {
     
     # Test 2: Generate attributes
     run_test "/api/analysis/attributes" \
-        "{\"text\":\"$CONVERSATION\",\"workflow_id\":\"$WORKFLOW_ID\"}" \
+        "{\"text\":\"$CONVERSATION\",\"attributes\":[{\"field_name\":\"customer_satisfaction\",\"description\":\"Customer satisfaction level (1-5)\"},{\"field_name\":\"resolution_type\",\"description\":\"Type of resolution provided\"}],\"workflow_id\":\"$WORKFLOW_ID\"}" \
         "Generate attributes from conversation"
     
     # Test 3: Generate required attributes
-    run_test "/api/analysis/required_attributes" \
-        "{\"text\":\"$CONVERSATION\",\"existing_attributes\":{\"intent\":\"billing issue\"},\"workflow_id\":\"$WORKFLOW_ID\"}" \
-        "Generate required attributes based on existing attributes"
+    run_test "/api/analysis/attributes" \
+        "{\"text\":\"$CONVERSATION\",\"generate_required\":true,\"questions\":[\"What are the key factors affecting customer satisfaction?\",\"What types of resolutions are most effective?\"],\"workflow_id\":\"$WORKFLOW_ID\"}" \
+        "Generate required attributes based on questions"
     
     # Test 4: Analyze trends
     run_test "/api/analysis/trends" \
-        "{\"conversations\":[{\"id\":\"1\",\"text\":\"$CONVERSATION\",\"intent\":\"billing issue\"}],\"workflow_id\":\"$WORKFLOW_ID\"}" \
-        "Analyze trends in conversations"
+        "{\"focus_areas\":[\"customer_satisfaction\",\"resolution_effectiveness\"],\"attribute_values\":{\"customer_satisfaction\":4,\"resolution_type\":\"refund\"},\"workflow_id\":\"$WORKFLOW_ID\"}" \
+        "Analyze trends in conversation data"
     
     # Test 5: Identify patterns
     run_test "/api/analysis/patterns" \
-        "{\"data\":[{\"id\":\"1\",\"intent\":\"billing issue\",\"resolution\":\"refund\"}],\"pattern_types\":[\"intent_frequency\",\"resolution_time\"],\"workflow_id\":\"$WORKFLOW_ID\"}" \
+        "{\"pattern_types\":[\"intent_groups\",\"resolution_patterns\"],\"attribute_values\":{\"intents\":[\"billing issue\",\"refund request\",\"subscription inquiry\"],\"max_groups\":5},\"workflow_id\":\"$WORKFLOW_ID\"}" \
         "Identify patterns in conversation data"
     
     # Test 6: Analyze findings
     run_test "/api/analysis/findings" \
-        "{\"data\":{\"patterns\":[{\"name\":\"duplicate_charge\",\"frequency\":42}],\"attributes\":{\"avg_resolution_time\":\"3.5 days\"}},\"workflow_id\":\"$WORKFLOW_ID\"}" \
+        "{\"questions\":[\"What is the average customer satisfaction?\",\"What are the most common resolution types?\"],\"attribute_values\":{\"customer_satisfaction\":4,\"resolution_type\":\"refund\",\"resolution_time\":\"3 days\"},\"workflow_id\":\"$WORKFLOW_ID\"}" \
         "Analyze findings from patterns and attributes"
     
     # Print summary

@@ -13,36 +13,54 @@ This document explains how the various example scripts work together to form a c
 - **Process**: Analyzes each conversation to determine primary intent
 - **Output**: JSON file with conversations and their associated intents
 - **Purpose**: Categorize conversations by primary customer intent
+- **API Endpoint**: `/api/analysis/intent`
 
 ### 2. Intent Grouping (group_intents.go)
 - **Input**: Generated intents from step 1
 - **Process**: Groups similar intents to identify patterns
 - **Output**: JSON file with intent groups and their related conversations
 - **Purpose**: Identify common intent categories and reduce intent fragmentation
+- **API Endpoint**: Uses several endpoints including `/api/analysis/patterns`
 
 ### 3. Attribute Identification (identify_attributes.go)
 - **Input**: Conversations filtered by specific intents
 - **Process**: Analyzes conversations to identify what attributes could be extracted
 - **Output**: JSON file with suggested attribute definitions
 - **Purpose**: Determine what structured data fields would be useful for further analysis
+- **API Endpoint**: `/api/analysis/attributes` with `generate_required` flag
 
 ### 4. Attribute Generation (generate_attributes.go)
 - **Input**: Conversations and attribute definitions
 - **Process**: Extracts specific attribute values from conversations
 - **Output**: JSON file with conversations and their extracted attributes
 - **Purpose**: Create structured data from unstructured conversations
+- **API Endpoint**: `/api/analysis/attributes`
 
 ### 5. Intent Matching (match_intents.go)
 - **Input**: Generated intents and predefined intent categories
 - **Process**: Compares generated intents against expected categories
 - **Output**: JSON file with matching results and evaluation metrics
 - **Purpose**: Evaluate intent classification accuracy and improve categorization
+- **API Endpoint**: `/api/analysis/intent`
 
 ### 6. Fee Dispute Analysis (analyze_fee_disputes.go)
 - **Input**: Conversations specifically about fee disputes with generated attributes
 - **Process**: Deep analysis of fee dispute patterns, causes, and resolutions
 - **Output**: JSON file with analysis results, trends, and insights
 - **Purpose**: Gain specific insights into fee dispute conversations
+- **API Endpoints**: `/api/analysis/attributes`, `/api/analysis/trends`, and `/api/analysis/findings`
+
+## API Integration
+
+All scripts communicate with the API server running at http://localhost:8080 and utilize the following endpoints:
+
+- `/api/analysis/intent` - For intent classification
+- `/api/analysis/attributes` - For attribute extraction and identification
+- `/api/analysis/patterns` - For pattern identification in data
+- `/api/analysis/trends` - For trend analysis in structured data
+- `/api/analysis/findings` - For deep analysis of specific insights
+
+The `ApiClient` class in `utils.go` handles all API communications with retries and error handling.
 
 ## Data Flow
 

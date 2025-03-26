@@ -180,20 +180,22 @@ func fetchConversationsByIntent(dbPath, intent string, limit int) ([]Conversatio
 	}
 	defer db.Close()
 
-	// Query for conversations with the specified intent
+	// Query for conversations with the specified intent using LIKE for partial matches
 	query := `
 	SELECT c.conversation_id, c.text
 	FROM conversations c
 	JOIN conversation_attributes ca ON c.conversation_id = ca.conversation_id
 	WHERE ca.type = 'intent'
-	AND ca.value = ?
+	AND lower(ca.value) LIKE lower(?)
 	AND c.text IS NOT NULL
 	AND LENGTH(c.text) > 100
 	ORDER BY RANDOM()
 	LIMIT ?
 	`
 
-	rows, err := db.Query(query, intent, limit)
+	// Add wildcards to match the intent anywhere in the value
+	intentPattern := "%" + intent + "%"
+	rows, err := db.Query(query, intentPattern, limit)
 	if err != nil {
 		return nil, fmt.Errorf("error querying database: %w", err)
 	}
@@ -233,21 +235,17 @@ func matchIntent(conv Conversation, targetIntent string, allIntents []string, th
 		return result, fmt.Errorf("error generating intent: %w", err)
 	}
 	
-	// Extract primary intent
-	primaryIntent, ok := resp["intent"].(string)
+	// Extract primary intent - try label first, then label_name as fallback
+	primaryIntent, ok := resp["label"].(string)
 	if !ok {
-		return result, fmt.Errorf("unexpected response format - missing intent")
+		primaryIntent, ok = resp["label_name"].(string)
+		if !ok {
+			return result, fmt.Errorf("unexpected response format - missing intent (label or label_name)")
+		}
 	}
 	
-	confidence, ok := resp["confidence"].(float64)
-	if !ok {
-		confidence = 0.0
-	}
-	
-	explanation, ok := resp["explanation"].(string)
-	if !ok {
-		explanation = ""
-	}
+	// Get confidence from description if available
+	confidence := 0.9 // Default confidence since we don't get explicit confidence from API
 	
 	// Set top match and confidence
 	result.TopMatch = primaryIntent
@@ -262,7 +260,7 @@ func matchIntent(conv Conversation, targetIntent string, allIntents []string, th
 		Intent:     primaryIntent,
 		Confidence: confidence,
 		Matched:    exactMatch,
-		Reason:     explanation,
+		Reason:     getString(resp, "description"),
 	}
 	
 	result.Matches = append(result.Matches, primaryMatch)
