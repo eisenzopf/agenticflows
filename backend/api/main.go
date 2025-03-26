@@ -19,6 +19,7 @@ type FlowData struct {
 }
 
 var flows = make(map[string]FlowData)
+var analysisHandler *AnalysisHandler
 
 func main() {
 	// Initialize database
@@ -27,11 +28,30 @@ func main() {
 	}
 	defer db.Close()
 
+	// Initialize analysis handler
+	var err error
+	analysisHandler, err = NewAnalysisHandler()
+	if err != nil {
+		log.Printf("Warning: Failed to initialize analysis handler: %v", err)
+		log.Println("Analysis endpoints will not be available")
+	}
+
 	// API routes
 	http.HandleFunc("/api/agents", handleAgents)
 	http.HandleFunc("/api/tools", handleTools)
 	http.HandleFunc("/api/workflows", handleWorkflows)
 	http.HandleFunc("/api/workflows/", handleWorkflow)
+
+	// Analysis routes (if initialized)
+	if analysisHandler != nil {
+		http.HandleFunc("/api/analysis/trends", analysisHandler.handleAnalysisTrends)
+		http.HandleFunc("/api/analysis/patterns", analysisHandler.handleAnalysisPatterns)
+		http.HandleFunc("/api/analysis/findings", analysisHandler.handleAnalysisFindings)
+		http.HandleFunc("/api/analysis/attributes", analysisHandler.handleTextAttributes)
+		http.HandleFunc("/api/analysis/intent", analysisHandler.handleTextIntent)
+		http.HandleFunc("/api/analysis/results", analysisHandler.handleAnalysisResults)
+		http.HandleFunc("/api/analysis/results/", analysisHandler.handleAnalysisResults)
+	}
 
 	// CORS middleware for development
 	handler := corsMiddleware(http.DefaultServeMux)
