@@ -111,6 +111,81 @@ func (a *Analyzer) IdentifyPatterns(ctx context.Context, req AnalysisRequest) (*
 		dataStr = string(dataBytes)
 	}
 
+	// Check if this is a request for intent groups
+	isIntentGroupsRequest := false
+	for _, patternType := range req.PatternTypes {
+		if patternType == "intent_groups" {
+			isIntentGroupsRequest = true
+			break
+		}
+	}
+
+	// Special handling for intent_groups pattern type
+	if isIntentGroupsRequest && req.AttributeValues != nil {
+		// Extract intents from the attribute values
+		intents, ok := req.AttributeValues["intents"]
+		if !ok {
+			return nil, fmt.Errorf("'intents' field is required in attribute_values for intent_groups pattern type")
+		}
+
+		// Build a more specific prompt for intent grouping
+		intentsList, err := json.Marshal(intents)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal intents: %w", err)
+		}
+
+		// Extract max_groups from the request if present
+		maxGroups := 20 // Default value
+		if maxGroupsVal, ok := req.AttributeValues["max_groups"]; ok {
+			if maxGroupsInt, ok := maxGroupsVal.(float64); ok {
+				maxGroups = int(maxGroupsInt)
+			} else if maxGroupsInt, ok := maxGroupsVal.(int); ok {
+				maxGroups = maxGroupsInt
+			}
+		}
+
+		prompt := fmt.Sprintf(`Group the following intents into semantic categories:
+
+Intents:
+%s
+
+Your task is to group these intents into at most %d semantic categories based on their meaning and purpose.
+For each group:
+1. Assign a descriptive category name
+2. Include relevant examples from the input list
+3. Provide a brief description of the group
+
+Format your response as JSON with these fields:
+{
+  "patterns": [
+    {
+      "pattern_type": str,        // This should be the category/group name
+      "pattern_description": str,  // Description of what this group represents
+      "occurrences": int,         // How many intents belong to this group
+      "examples": [str],          // List of example intents in this group
+      "significance": str         // Brief explanation of why this grouping is meaningful
+    }
+  ],
+  "unexpected_patterns": []
+}`, string(intentsList), maxGroups)
+
+		expectedFormat := map[string]interface{}{
+			"patterns": []interface{}{},
+			"unexpected_patterns": []interface{}{},
+		}
+
+		result, err := a.llmClient.GenerateContent(ctx, prompt, expectedFormat)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate content for intent groups: %w", err)
+		}
+
+		return &AnalysisResponse{
+			Results:    result,
+			Confidence: 0.8,
+		}, nil
+	}
+
+	// Default pattern identification prompt (for non-intent_groups)
 	prompt := fmt.Sprintf(`Identify patterns in the following conversation data for these pattern types:
 
 Pattern Types:

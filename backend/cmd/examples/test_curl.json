@@ -1,0 +1,1 @@
+{"attribute_values":{"intents":[{"count":17,"intent":"Security Deposit Inquiry"},{"count":8,"intent":"Roth IRA Information"},{"count":8,"intent":"Compliance Update"},{"count":7,"intent":"Inquire Transaction Fees"},{"count":13,"intent":"Loan Interest Explanation"}]},"pattern_types":["intent_groups"],"workflow_id":"test-curl"}

@@ -204,34 +204,23 @@ func (c *ApiClient) AnalyzeTrends(data []map[string]interface{}) (map[string]int
 func (c *ApiClient) IdentifyPatterns(data []map[string]interface{}, patternTypes []string) (map[string]interface{}, error) {
 	// Prepare request body
 	requestBody := map[string]interface{}{
-		"data":          data,
+		"attribute_values": map[string]interface{}{
+			"data": data,
+		},
 		"pattern_types": patternTypes,
 		"workflow_id":   c.workflowID,
 	}
 	
-	// Try to make API request
+	// Debug log before making request
+	if c.debug {
+		fmt.Println("Making IdentifyPatterns request to patterns endpoint with:")
+		jsonData, _ := json.MarshalIndent(requestBody, "", "  ")
+		fmt.Println(string(jsonData))
+	}
+	
+	// Make API request
 	resp, err := c.makeRequest("patterns", requestBody)
 	if err != nil {
-		if strings.Contains(err.Error(), "404") {
-			fmt.Println("API call failed:", err, ", implementing client-side pattern identification")
-			
-			// Create a fallback response with generic patterns
-			patterns := []string{
-				"Customers who mention being 'surprised' by a fee are more likely to be granted a waiver.",
-				"Conversations that start with an explanation of the fee policy are resolved more efficiently.",
-				"Customers who have been with the bank for more than 5 years expect fees to be waived.",
-				"Agent empathy statements lead to higher customer satisfaction regardless of outcome.",
-			}
-			
-			fallbackResponse := map[string]interface{}{
-				"patterns": patterns,
-			}
-			
-			// Debug log for fallback
-			c.printDebug("patterns (fallback)", requestBody, fallbackResponse, nil)
-			
-			return fallbackResponse, nil
-		}
 		return nil, err
 	}
 	
@@ -246,22 +235,16 @@ func (c *ApiClient) AnalyzeFindings(data map[string]interface{}) (map[string]int
 		"workflow_id": c.workflowID,
 	}
 	
-	// Try to make API request
+	// Debug log before making request
+	if c.debug {
+		fmt.Println("Making AnalyzeFindings request to findings endpoint with:")
+		jsonData, _ := json.MarshalIndent(requestBody, "", "  ")
+		fmt.Println(string(jsonData))
+	}
+	
+	// Make API request
 	resp, err := c.makeRequest("findings", requestBody)
 	if err != nil {
-		if strings.Contains(err.Error(), "404") {
-			fmt.Println("API call failed:", err, ", implementing client-side findings analysis")
-			
-			// Create a fallback response with generic insights
-			fallbackResponse := map[string]interface{}{
-				"insights": "Based on the analyzed data, most fee disputes are related to monthly service charges and overdraft fees. Customer sentiment is generally negative initially but improves when fees are waived or when clear explanations are provided. Agents who offer alternatives and explain policies in simple terms achieve better resolution rates.",
-			}
-			
-			// Debug log for fallback
-			c.printDebug("findings (fallback)", requestBody, fallbackResponse, nil)
-			
-			return fallbackResponse, nil
-		}
 		return nil, err
 	}
 	
@@ -270,93 +253,288 @@ func (c *ApiClient) AnalyzeFindings(data map[string]interface{}) (map[string]int
 
 // GroupIntents groups intents into categories
 func (c *ApiClient) GroupIntents(intents []map[string]interface{}, maxGroups int) (map[string]interface{}, error) {
-	// Prepare request body
-	requestBody := map[string]interface{}{
-		"intents":     intents,
-		"max_groups":  maxGroups,
-		"workflow_id": c.workflowID,
-	}
+	// Define batch size - limit to 10 intents per request to avoid server overload
+	batchSize := 10
 	
-	// Try to make API request
-	resp, err := c.makeRequest("group_intents", requestBody)
-	if err != nil {
-		if strings.Contains(err.Error(), "404") {
-			fmt.Println("API call failed:", err, ", implementing client-side intent grouping")
-			
-			// Create a fallback response with simplified groups
-			groups := []map[string]interface{}{
-				{
-					"name":        "Account-related inquiries",
-					"description": "This group contains conversations related to account-related.",
-					"examples":    []string{"Account Fee Dispute", "Account Benefits", "Account Interest"},
-					"count":       0,
-				},
-				{
-					"name":        "Fee-related inquiries",
-					"description": "This group contains conversations related to fee-related.",
-					"examples":    []string{"Waive Annual Fee", "ATM Fees", "Dispute Fee"},
-					"count":       0,
-				},
-			}
-			
-			// Calculate counts based on input
-			for _, group := range groups {
-				groupName := group["name"].(string)
-				count := 0
-				for _, intent := range intents {
-					intentName, _ := intent["intent"].(string)
-					if strings.Contains(strings.ToLower(intentName), strings.ToLower(groupName)) {
-						count++
+	// Normalize counts to avoid outliers overwhelming the model
+	normalizedIntents := make([]map[string]interface{}, 0, len(intents))
+	for _, intent := range intents {
+		normalizedIntent := make(map[string]interface{})
+		for k, v := range intent {
+			// Cap count values to a reasonable maximum (e.g., 100)
+			if k == "count" {
+				count, ok := v.(int)
+				if !ok {
+					if fcount, ok := v.(float64); ok {
+						count = int(fcount)
 					}
 				}
-				group["count"] = count
+				if count > 100 {
+					normalizedIntent[k] = 100
+					if c.debug {
+						fmt.Printf("Normalized count for intent '%v' from %d to 100\n", 
+							intent["intent"], count)
+					}
+				} else {
+					normalizedIntent[k] = v
+				}
+			} else {
+				normalizedIntent[k] = v
 			}
-			
-			fallbackResponse := map[string]interface{}{
-				"groups": groups,
-			}
-			
-			// Debug log for fallback
-			c.printDebug("group_intents (fallback)", requestBody, fallbackResponse, nil)
-			
-			return fallbackResponse, nil
 		}
+		normalizedIntents = append(normalizedIntents, normalizedIntent)
+	}
+	
+	// If intents list is small enough, send in a single request
+	if len(normalizedIntents) <= batchSize {
+		return c.processIntentBatch(normalizedIntents, maxGroups)
+	}
+	
+	// Process in batches
+	if c.debug {
+		fmt.Printf("Splitting %d intents into batches of %d\n", len(normalizedIntents), batchSize)
+	}
+	
+	var allGroups []map[string]interface{}
+	var allPatterns []interface{}
+	batchCount := (len(normalizedIntents) + batchSize - 1) / batchSize
+	
+	// Process intents in batches
+	for i := 0; i < len(normalizedIntents); i += batchSize {
+		end := i + batchSize
+		if end > len(normalizedIntents) {
+			end = len(normalizedIntents)
+		}
+		
+		batch := normalizedIntents[i:end]
+		batchNum := (i / batchSize) + 1
+		
+		if c.debug {
+			fmt.Printf("Processing batch %d/%d with %d intents\n", batchNum, batchCount, len(batch))
+		}
+		
+		// Process this batch with retry logic
+		maxRetries := 2
+		var batchResult map[string]interface{}
+		var err error
+		
+		for retry := 0; retry <= maxRetries; retry++ {
+			// If this is a retry, wait a bit before trying again
+			if retry > 0 {
+				if c.debug {
+					fmt.Printf("Retry %d/%d for batch %d\n", retry, maxRetries, batchNum)
+				}
+				time.Sleep(time.Duration(retry) * 500 * time.Millisecond) // Exponential backoff
+			}
+			
+			// Try to process the batch
+			batchResult, err = c.processIntentBatch(batch, maxGroups)
+			if err == nil {
+				break // Successful, exit retry loop
+			}
+			
+			// If we've exhausted retries, log the error
+			if retry == maxRetries {
+				if c.debug {
+					fmt.Printf("Error processing batch %d after %d retries: %s\n", batchNum, maxRetries, err)
+				}
+			}
+		}
+		
+		// If we still have an error after retries, continue with partial results
+		if err != nil {
+			continue
+		}
+		
+		// Extract groups from the batch result
+		if groups, ok := batchResult["groups"].([]map[string]interface{}); ok {
+			if c.debug {
+				fmt.Printf("Batch %d returned %d groups\n", batchNum, len(groups))
+			}
+			allGroups = append(allGroups, groups...)
+		}
+		
+		// Extract patterns for future processing
+		if patterns, ok := batchResult["patterns"].([]interface{}); ok {
+			allPatterns = append(allPatterns, patterns...)
+		}
+	}
+	
+	// If we didn't get any groups, return an error
+	if len(allGroups) == 0 {
+		return nil, fmt.Errorf("failed to process all batches, no groups were returned")
+	}
+	
+	// Combine the results
+	if c.debug {
+		fmt.Printf("Combining results from %d batches. Total of %d groups found.\n", 
+			batchCount, len(allGroups))
+	}
+	
+	// Deduplicate groups if needed
+	// This is simplified deduplication - in a real system you might want more sophisticated logic
+	groupMap := make(map[string]map[string]interface{})
+	for _, group := range allGroups {
+		if name, ok := group["name"].(string); ok {
+			// Only keep the first instance of each group name
+			if _, exists := groupMap[name]; !exists {
+				groupMap[name] = group
+			}
+		}
+	}
+	
+	// Convert back to slice
+	uniqueGroups := make([]map[string]interface{}, 0, len(groupMap))
+	for _, group := range groupMap {
+		uniqueGroups = append(uniqueGroups, group)
+	}
+	
+	if c.debug {
+		fmt.Printf("After deduplication: %d unique groups\n", len(uniqueGroups))
+	}
+	
+	return map[string]interface{}{
+		"groups": uniqueGroups,
+		"patterns": allPatterns,
+	}, nil
+}
+
+// processIntentBatch processes a single batch of intents
+func (c *ApiClient) processIntentBatch(intents []map[string]interface{}, maxGroups int) (map[string]interface{}, error) {
+	// Prepare request body - use the correct format expected by the API
+	requestBody := map[string]interface{}{
+		"attribute_values": map[string]interface{}{
+			"intents": intents,
+			"max_groups": maxGroups, // Put max_groups inside attribute_values instead
+		},
+		"pattern_types": []string{"intent_groups"},
+		"workflow_id":   c.workflowID,
+	}
+	
+	// Debug log before making request
+	if c.debug {
+		fmt.Println("Making GroupIntents request to patterns endpoint with:")
+		jsonData, _ := json.MarshalIndent(requestBody, "", "  ")
+		fmt.Println(string(jsonData))
+	}
+	
+	// Make API request
+	resp, err := c.makeRequest("patterns", requestBody)
+	if err != nil {
 		return nil, err
 	}
 	
+	// Extract results from response
+	resultsData, ok := resp["results"].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("unexpected response format: missing 'results' field")
+	}
+	
+	// Transform the patterns response into the expected groups format
+	if patterns, ok := resultsData["patterns"].([]interface{}); ok {
+		groups := make([]map[string]interface{}, 0)
+		
+		for _, pattern := range patterns {
+			if patternMap, ok := pattern.(map[string]interface{}); ok {
+				// Extract pattern info
+				description := getString(patternMap, "pattern_description")
+				examples := getStringArray(patternMap, "examples")
+				
+				// Create a group
+				group := map[string]interface{}{
+					"name":        getString(patternMap, "pattern_type"),
+					"description": description,
+					"examples":    examples,
+					"count":       getInt(patternMap, "occurrences"),
+				}
+				
+				groups = append(groups, group)
+			}
+		}
+		
+		// Return in the expected format
+		return map[string]interface{}{
+			"groups": groups,
+			"patterns": patterns,
+		}, nil
+	}
+	
 	return resp, nil
+}
+
+// Helper functions for safe type conversion
+func getString(m map[string]interface{}, key string) string {
+	if val, ok := m[key].(string); ok {
+		return val
+	}
+	return ""
+}
+
+func getInt(m map[string]interface{}, key string) int {
+	switch v := m[key].(type) {
+	case int:
+		return v
+	case float64:
+		return int(v)
+	default:
+		return 0
+	}
+}
+
+func getStringArray(m map[string]interface{}, key string) []string {
+	if val, ok := m[key].([]interface{}); ok {
+		result := make([]string, 0, len(val))
+		for _, item := range val {
+			if str, ok := item.(string); ok {
+				result = append(result, str)
+			}
+		}
+		return result
+	}
+	return []string{}
 }
 
 // DescribeGroup generates a description for an intent group
 func (c *ApiClient) DescribeGroup(groupName string, examples []string) (map[string]interface{}, error) {
 	// Prepare request body
 	requestBody := map[string]interface{}{
-		"group_name":  groupName,
-		"examples":    strings.Join(examples, "\n- "),
-		"workflow_id": c.workflowID,
+		"attribute_values": map[string]interface{}{
+			"group_name": groupName,
+			"examples":   examples,
+		},
+		"pattern_types": []string{"group_description"},
+		"workflow_id":   c.workflowID,
 	}
 	
-	// Try to make API request
-	resp, err := c.makeRequest("describe_group", requestBody)
+	// Debug log before making request
+	if c.debug {
+		fmt.Println("Making DescribeGroup request to patterns endpoint with:")
+		jsonData, _ := json.MarshalIndent(requestBody, "", "  ")
+		fmt.Println(string(jsonData))
+	}
+	
+	// Make API request
+	resp, err := c.makeRequest("patterns", requestBody)
 	if err != nil {
-		if strings.Contains(err.Error(), "404") {
-			fmt.Println("API call failed:", err, ", implementing client-side description generation")
-			
-			// Create a fallback description based on the group name
-			groupType := strings.ToLower(strings.ReplaceAll(groupName, "-related inquiries", ""))
-			fallbackResponse := map[string]interface{}{
-				"description": fmt.Sprintf("This group contains conversations related to %s. These typically involve customer inquiries about %s details, balances, or %s management.", groupType, groupType, groupType),
-			}
-			
-			// Debug log for fallback
-			c.printDebug("describe_group (fallback)", requestBody, fallbackResponse, nil)
-			
-			return fallbackResponse, nil
-		}
 		return nil, err
 	}
 	
-	return resp, nil
+	// Extract the description from the patterns response
+	if patterns, ok := resp["patterns"].([]interface{}); ok && len(patterns) > 0 {
+		if pattern, ok := patterns[0].(map[string]interface{}); ok {
+			description := getString(pattern, "pattern_description")
+			if description != "" {
+				return map[string]interface{}{
+					"description": description,
+				}, nil
+			}
+		}
+	}
+	
+	// If we couldn't extract a description from the response
+	return map[string]interface{}{
+		"description": "No description available from API response.",
+	}, nil
 }
 
 // IdentifyAttributes identifies attributes in the given text
@@ -368,27 +546,16 @@ func (c *ApiClient) IdentifyAttributes(questions []string, text string) (map[str
 		"workflow_id": c.workflowID,
 	}
 	
-	// Try to make API request
+	// Debug log before making request
+	if c.debug {
+		fmt.Println("Making IdentifyAttributes request to intent endpoint with:")
+		jsonData, _ := json.MarshalIndent(requestBody, "", "  ")
+		fmt.Println(string(jsonData))
+	}
+	
+	// Make API request
 	resp, err := c.makeRequest("intent", requestBody)
 	if err != nil {
-		if strings.Contains(err.Error(), "404") {
-			fmt.Println("API call failed:", err, ", implementing client-side intent identification")
-			
-			// Create a fallback response with default intent data
-			fallbackResponse := map[string]interface{}{
-				"intent": map[string]interface{}{
-					"label":       "dispute_fee",
-					"label_name":  "Dispute Fee",
-					"description": "The customer is disputing a fee charged to their account.",
-					"confidence":  0.85,
-				},
-			}
-			
-			// Debug log for fallback
-			c.printDebug("intent (fallback)", requestBody, fallbackResponse, nil)
-			
-			return fallbackResponse, nil
-		}
 		return nil, err
 	}
 	
@@ -431,6 +598,17 @@ func (c *ApiClient) makeRequest(endpoint string, requestBody map[string]interfac
 	
 	// Check response status
 	if resp.StatusCode != http.StatusOK {
+		// Try to extract detailed error message if possible
+		var errorResp map[string]interface{}
+		if err := json.Unmarshal(respBody, &errorResp); err == nil {
+			if errorMsg, ok := errorResp["error"].(string); ok {
+				err := fmt.Errorf("API returned error (status %d): %s", resp.StatusCode, errorMsg)
+				c.printDebug(endpoint, requestBody, errorResp, err)
+				return nil, err
+			}
+		}
+		
+		// Fall back to generic error with response body
 		err := fmt.Errorf("API returned non-OK status: %d, body: %s", resp.StatusCode, string(respBody))
 		c.printDebug(endpoint, requestBody, nil, err)
 		return nil, err
