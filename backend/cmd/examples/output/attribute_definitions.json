@@ -1,18 +1,9 @@
 {
   "attributes": [
     {
-      "field_name": "primary_intent",
-      "title": "Primary Intent",
-      "description": "The primary purpose or goal of the customer contact",
-      "type": "string",
-      "enum_values": [
-        "dispute_fee"
-      ]
-    },
-    {
       "field_name": "customer_sentiment",
       "title": "Customer Sentiment",
-      "description": "The emotional tone of the customer during the conversation",
+      "description": "The overall emotional tone of the customer during the conversation",
       "type": "string",
       "enum_values": [
         "positive",
@@ -24,7 +15,7 @@
     {
       "field_name": "resolution_status",
       "title": "Resolution Status",
-      "description": "Whether the customer's issue was resolved during the conversation",
+      "description": "Whether and how the customer's issue was resolved",
       "type": "string",
       "enum_values": [
         "resolved",
@@ -32,35 +23,10 @@
         "escalated",
         "unresolved"
       ]
-    },
-    {
-      "field_name": "fee_type",
-      "title": "Fee Type",
-      "description": "Type of fee discussed in the conversation",
-      "type": "string",
-      "enum_values": [
-        "overdraft",
-        "monthly_service",
-        "late_payment",
-        "origination",
-        "other"
-      ]
-    },
-    {
-      "field_name": "fee_amount",
-      "title": "Fee Amount",
-      "description": "The monetary amount of the fee",
-      "type": "number"
-    },
-    {
-      "field_name": "fee_waived",
-      "title": "Fee Waived",
-      "description": "Whether the fee was waived or reduced",
-      "type": "boolean"
     }
   ],
-  "conversation_count": 2,
+  "conversation_count": 10,
   "intent_type": "fee dispute",
-  "timestamp": "2025-03-25T22:44:07-07:00",
-  "workflow_id": "example-20250325224355"
+  "timestamp": "2025-03-26T00:55:57-07:00",
+  "workflow_id": "example-20250326005555"
 }

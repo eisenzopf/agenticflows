@@ -187,9 +187,9 @@ func groupIntents(intents map[string]int, maxGroups int, apiClient *ApiClient) (
 	}
 	
 	// Extract groups from response
-	groupsData, ok := resp["groups"].([]interface{})
+	groupsData, ok := resp["patterns"].([]interface{})
 	if !ok {
-		return nil, fmt.Errorf("unexpected response format")
+		return nil, fmt.Errorf("unexpected response format: missing or invalid 'patterns' field")
 	}
 	
 	// Convert response to IntentGroup structs
@@ -200,10 +200,16 @@ func groupIntents(intents map[string]int, maxGroups int, apiClient *ApiClient) (
 			continue
 		}
 		
-		// Extract name
-		name, ok := groupMap["name"].(string)
+		// Extract name (pattern_type)
+		name, ok := groupMap["pattern_type"].(string)
 		if !ok || name == "" {
 			continue
+		}
+		
+		// Extract description
+		description, ok := groupMap["pattern_description"].(string)
+		if !ok {
+			description = ""
 		}
 		
 		// Extract examples
@@ -227,9 +233,10 @@ func groupIntents(intents map[string]int, maxGroups int, apiClient *ApiClient) (
 		
 		// Create group
 		group := IntentGroup{
-			Name:     name,
-			Examples: examples,
-			Count:    count,
+			Name:        name,
+			Description: description,
+			Examples:    examples,
+			Count:       count,
 		}
 		
 		groups = append(groups, group)

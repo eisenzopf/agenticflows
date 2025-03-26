@@ -170,7 +170,15 @@ Format your response as JSON with these fields:
 }`, string(intentsList), maxGroups)
 
 		expectedFormat := map[string]interface{}{
-			"patterns": []interface{}{},
+			"patterns": []interface{}{
+				map[string]interface{}{
+					"pattern_type":        "",
+					"pattern_description": "",
+					"occurrences":         0,
+					"examples":            []interface{}{},
+					"significance":        "",
+				},
+			},
 			"unexpected_patterns": []interface{}{},
 		}
 

@@ -140,71 +140,16 @@ func main() {
 			},
 		}
 	} else {
-		// Check if attributes are present
-		if attrsData, ok := resp["attributes"].([]interface{}); ok && len(attrsData) > 0 {
-			// Extract attribute definitions from response
-			for _, attr := range attrsData {
-				if attrMap, ok := attr.(map[string]interface{}); ok {
-					// Extract field values
-					fieldName, _ := attrMap["field_name"].(string)
-					title, _ := attrMap["title"].(string)
-					description, _ := attrMap["description"].(string)
-					attrType, _ := attrMap["type"].(string)
-					
-					// Default to string type if not specified
-					if attrType == "" {
-						attrType = "string"
-					}
-					
-					// Skip if missing required fields
-					if fieldName == "" || title == "" {
-						continue
-					}
-					
-					// Extract enum values if applicable
-					var enumValues []string
-					if enumVals, ok := attrMap["enum_values"].([]interface{}); ok {
-						for _, val := range enumVals {
-							if strVal, ok := val.(string); ok {
-								enumValues = append(enumValues, strVal)
-							}
-						}
-					} else if enumStr, ok := attrMap["enum_values"].(string); ok && enumStr != "" {
-						// Handle string format (comma-separated)
-						for _, val := range strings.Split(enumStr, ",") {
-							enumValues = append(enumValues, strings.TrimSpace(val))
-						}
-					}
-					
-					// Create attribute definition
-					attrDef := AttributeDefinition{
-						FieldName:   fieldName,
-						Title:       title,
-						Description: description,
-						Type:        attrType,
-						EnumValues:  enumValues,
-					}
-					
-					attributeDefs = append(attributeDefs, attrDef)
-				}
-			}
+		// Get the intent from the response
+		var intent string
+		if label, ok := resp["label"].(string); ok {
+			intent = label
+		} else if labelName, ok := resp["label_name"].(string); ok {
+			intent = labelName
 		}
-		
-		// If no attributes were found or processed from the response, use the intent to create attributes
-		if len(attributeDefs) == 0 {
-			fmt.Println("No attributes found in response, generating based on intent...")
-			
-			// Get the intent from the response
-			var intent string
-			if label, ok := resp["intent"].(map[string]interface{})["label"].(string); ok {
-				intent = label
-			} else if labelName, ok := resp["intent"].(map[string]interface{})["label_name"].(string); ok {
-				intent = labelName
-			}
-			
-			// Generate attributes based on the intent and questions
-			attributeDefs = generateAttributesFromIntent(intent, questions)
-		}
+
+		// Generate attributes based on the intent and questions
+		attributeDefs = generateAttributesFromIntent(intent, questions)
 	}
 
 	// Step 4: Validate attribute definitions
@@ -416,93 +361,170 @@ func saveAttributesToDatabase(dbPath string, attributes []AttributeDefinition, w
 	return true
 }
 
-// generateAttributesFromIntent creates attribute definitions based on the intent and questions
+// generateAttributesFromIntent creates appropriate attribute definitions based on the intent and questions
 func generateAttributesFromIntent(intent string, questions []string) []AttributeDefinition {
-	// Basic attributes that apply to almost any conversation
-	attributes := []AttributeDefinition{
-		{
-			FieldName:   "primary_intent",
-			Title:       "Primary Intent",
-			Description: "The primary purpose or goal of the customer contact",
-			Type:        "string",
-			EnumValues:  []string{intent},
-		},
+	// Start with common attributes for all banking conversations
+	attributeDefs := []AttributeDefinition{
 		{
 			FieldName:   "customer_sentiment",
 			Title:       "Customer Sentiment",
-			Description: "The emotional tone of the customer during the conversation",
+			Description: "The overall emotional tone of the customer during the conversation",
 			Type:        "string",
 			EnumValues:  []string{"positive", "neutral", "negative", "very_negative"},
 		},
 		{
 			FieldName:   "resolution_status",
 			Title:       "Resolution Status",
-			Description: "Whether the customer's issue was resolved during the conversation",
+			Description: "Whether and how the customer's issue was resolved",
 			Type:        "string",
 			EnumValues:  []string{"resolved", "partially_resolved", "escalated", "unresolved"},
 		},
 	}
-	
+
 	// Add intent-specific attributes
-	intentLower := strings.ToLower(intent)
-	
-	// Mortgage/Escrow related
-	if strings.Contains(intentLower, "mortgage") || strings.Contains(intentLower, "escrow") {
-		attributes = append(attributes, AttributeDefinition{
-			FieldName:   "escrow_change_reason",
-			Title:       "Escrow Change Reason",
-			Description: "Reason for changes in escrow payments",
-			Type:        "string",
-			EnumValues:  []string{"property_tax_increase", "insurance_premium_increase", "shortage_payment", "other"},
-		})
+	switch intent {
+	case "Account Fee Dispute":
+		attributeDefs = append(attributeDefs, []AttributeDefinition{
+			{
+				FieldName:   "fee_type",
+				Title:       "Fee Type",
+				Description: "The type of fee being disputed",
+				Type:        "string",
+				EnumValues:  []string{"overdraft", "monthly_service", "atm", "wire_transfer", "other"},
+			},
+			{
+				FieldName:   "fee_amount",
+				Title:       "Fee Amount",
+				Description: "The monetary amount of the fee in dispute",
+				Type:        "number",
+			},
+			{
+				FieldName:   "fee_waived",
+				Title:       "Fee Waived",
+				Description: "Whether the fee was waived or reduced",
+				Type:        "boolean",
+			},
+			{
+				FieldName:   "dispute_reason",
+				Title:       "Dispute Reason",
+				Description: "The customer's stated reason for disputing the fee",
+				Type:        "string",
+			},
+		}...)
+	case "Account Inquiry":
+		attributeDefs = append(attributeDefs, []AttributeDefinition{
+			{
+				FieldName:   "inquiry_type",
+				Title:       "Inquiry Type",
+				Description: "The type of account information being requested",
+				Type:        "string",
+				EnumValues:  []string{"balance", "transaction_history", "account_status", "other"},
+			},
+			{
+				FieldName:   "account_type",
+				Title:       "Account Type",
+				Description: "The type of account being inquired about",
+				Type:        "string",
+				EnumValues:  []string{"checking", "savings", "credit_card", "loan", "other"},
+			},
+		}...)
+	case "Technical Issue":
+		attributeDefs = append(attributeDefs, []AttributeDefinition{
+			{
+				FieldName:   "issue_platform",
+				Title:       "Issue Platform",
+				Description: "The platform or channel where the technical issue occurred",
+				Type:        "string",
+				EnumValues:  []string{"mobile_app", "web_browser", "atm", "phone_system", "other"},
+			},
+			{
+				FieldName:   "error_message",
+				Title:       "Error Message",
+				Description: "Any specific error message or code encountered",
+				Type:        "string",
+			},
+			{
+				FieldName:   "issue_resolved",
+				Title:       "Issue Resolved",
+				Description: "Whether the technical issue was resolved during the conversation",
+				Type:        "boolean",
+			},
+		}...)
+	case "Fraud Concern":
+		attributeDefs = append(attributeDefs, []AttributeDefinition{
+			{
+				FieldName:   "fraud_type",
+				Title:       "Fraud Type",
+				Description: "The type of fraud concern reported",
+				Type:        "string",
+				EnumValues:  []string{"unauthorized_transaction", "suspicious_activity", "identity_theft", "other"},
+			},
+			{
+				FieldName:   "transaction_amount",
+				Title:       "Transaction Amount",
+				Description: "The amount of the suspicious transaction",
+				Type:        "number",
+			},
+			{
+				FieldName:   "account_frozen",
+				Title:       "Account Frozen",
+				Description: "Whether the account was frozen as a precaution",
+				Type:        "boolean",
+			},
+		}...)
+	case "Service Complaint":
+		attributeDefs = append(attributeDefs, []AttributeDefinition{
+			{
+				FieldName:   "complaint_type",
+				Title:       "Complaint Type",
+				Description: "The type of service complaint",
+				Type:        "string",
+				EnumValues:  []string{"wait_time", "staff_behavior", "process_issue", "other"},
+			},
+			{
+				FieldName:   "resolution_offered",
+				Title:       "Resolution Offered",
+				Description: "Whether a specific resolution was offered to the customer",
+				Type:        "boolean",
+			},
+			{
+				FieldName:   "compensation_offered",
+				Title:       "Compensation Offered",
+				Description: "Whether any compensation was offered to the customer",
+				Type:        "boolean",
+			},
+		}...)
+	default:
+		// For unknown intents, add generic attributes based on the questions
+		for _, question := range questions {
+			// Extract key terms from questions to create relevant attributes
+			lowerQuestion := strings.ToLower(question)
+			if strings.Contains(lowerQuestion, "amount") || strings.Contains(lowerQuestion, "cost") {
+				attributeDefs = append(attributeDefs, AttributeDefinition{
+					FieldName:   "amount",
+					Title:       "Amount",
+					Description: "The monetary amount discussed in the conversation",
+					Type:        "number",
+				})
+			}
+			if strings.Contains(lowerQuestion, "date") || strings.Contains(lowerQuestion, "when") {
+				attributeDefs = append(attributeDefs, AttributeDefinition{
+					FieldName:   "date",
+					Title:       "Date",
+					Description: "The date discussed in the conversation",
+					Type:        "string",
+				})
+			}
+			if strings.Contains(lowerQuestion, "reason") || strings.Contains(lowerQuestion, "why") {
+				attributeDefs = append(attributeDefs, AttributeDefinition{
+					FieldName:   "reason",
+					Title:       "Reason",
+					Description: "The reason or explanation discussed in the conversation",
+					Type:        "string",
+				})
+			}
+		}
 	}
-	
-	// Fee related
-	if strings.Contains(intentLower, "fee") {
-		attributes = append(attributes, AttributeDefinition{
-			FieldName:   "fee_type",
-			Title:       "Fee Type",
-			Description: "Type of fee discussed in the conversation",
-			Type:        "string",
-			EnumValues:  []string{"overdraft", "monthly_service", "late_payment", "origination", "other"},
-		})
-		
-		attributes = append(attributes, AttributeDefinition{
-			FieldName:   "fee_amount",
-			Title:       "Fee Amount",
-			Description: "The monetary amount of the fee",
-			Type:        "number",
-		})
-		
-		attributes = append(attributes, AttributeDefinition{
-			FieldName:   "fee_waived",
-			Title:       "Fee Waived",
-			Description: "Whether the fee was waived or reduced",
-			Type:        "boolean",
-		})
-	}
-	
-	// Loan related
-	if strings.Contains(intentLower, "loan") || strings.Contains(intentLower, "debt") {
-		attributes = append(attributes, AttributeDefinition{
-			FieldName:   "loan_type",
-			Title:       "Loan Type",
-			Description: "Type of loan discussed",
-			Type:        "string",
-			EnumValues:  []string{"personal", "mortgage", "auto", "student", "business", "debt_consolidation", "other"},
-		})
-	}
-	
-	// Credit related
-	if strings.Contains(intentLower, "credit") {
-		attributes = append(attributes, AttributeDefinition{
-			FieldName:   "credit_topic",
-			Title:       "Credit Topic",
-			Description: "Specific credit-related topic discussed",
-			Type:        "string",
-			EnumValues:  []string{"credit_score", "credit_limit", "credit_application", "credit_report", "other"},
-		})
-	}
-	
-	return attributes
+
+	return attributeDefs
 } 
