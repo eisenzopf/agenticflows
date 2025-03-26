@@ -33,10 +33,9 @@ func main() {
 	// Parse command-line arguments
 	dbPath := flag.String("db", "", "Path to the SQLite database")
 	outputPath := flag.String("output", "", "Path to save results as JSON (optional)")
-	minCount := flag.Int("min-count", 5, "Minimum count for intent groups")
+	minCount := flag.Int("min-count", 100, "Minimum count for intent groups")
 	maxGroups := flag.Int("max-groups", 20, "Maximum number of intent groups to generate")
 	workflowID := flag.String("workflow", "", "Workflow ID for persisting results")
-	limit := flag.Int("limit", 100, "Maximum number of intents to process")
 	debugFlag := flag.Bool("debug", false, "Enable debug output")
 	flag.Parse()
 
@@ -58,7 +57,7 @@ func main() {
 	}
 
 	// Step 1: Fetch intents from database
-	intents, err := fetchIntents(*dbPath, *minCount, *limit)
+	intents, err := fetchIntents(*dbPath, *minCount)
 	if err != nil {
 		fmt.Printf("Error fetching intents: %v\n", err)
 		os.Exit(1)
@@ -118,7 +117,7 @@ func main() {
 }
 
 // fetchIntents fetches intents from the database
-func fetchIntents(dbPath string, minCount int, limit int) (map[string]int, error) {
+func fetchIntents(dbPath string, minCount int) (map[string]int, error) {
 	// Connect to the database
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {

@@ -14,7 +14,7 @@ WORKFLOW_ID="example-$(date +%Y%m%d%H%M%S)"
 DEBUG=false
 LIMIT=10
 SAMPLE_SIZE=3
-MIN_COUNT=5
+MIN_COUNT=100
 TARGET_CLASS="fee dispute"
 INTENTS="cancel,upgrade,billing"
 THRESHOLD=0.7
@@ -31,7 +31,7 @@ function show_usage {
     echo "  -w, --workflow ID       Workflow ID (default: generated timestamp)"
     echo "  -l, --limit NUM         Limit number of items to process (default: 10)"
     echo "  -s, --sample NUM        Sample size for conversation analysis (default: 3)"
-    echo "  -m, --min-count NUM     Minimum count threshold (default: 5)"
+    echo "  -m, --min-count NUM     Minimum count threshold (default: 100)"
     echo "  -t, --target CLASS      Target class for analysis (default: 'fee dispute')"
     echo "  -i, --intents LIST      Comma-separated list of intents (default: cancel,upgrade,billing)"
     echo "  -c, --confidence NUM    Confidence threshold (default: 0.7)"
@@ -190,7 +190,6 @@ function run_group_intents {
         --output "$OUTPUT_FILE" \
         --min-count "$MIN_COUNT" \
         --max-groups 20 \
-        --limit "$LIMIT" \
         --workflow "$WORKFLOW_ID" \
         $DEBUG_FLAG
     
