@@ -38,7 +38,8 @@ func main() {
 	outputPath := flag.String("output", "", "Path to save results as JSON (optional)")
 	targetIntent := flag.String("target", "", "Target intent to match against")
 	intentList := flag.String("intents", "", "List of intents to match (comma-separated)")
-	sampleSize := flag.Int("sample-size", 25, "Number of conversations to sample per intent")
+	limit := flag.Int("limit", 25, "Number of conversations to sample per intent")
+	sampleSizeFlag := flag.Int("sample-size", 0, "DEPRECATED: Use --limit instead")
 	threshold := flag.Float64("threshold", 0.7, "Confidence threshold for matching")
 	workflowID := flag.String("workflow", "", "Workflow ID for persisting results")
 	debugFlag := flag.Bool("debug", false, "Enable debug output")
@@ -56,11 +57,22 @@ func main() {
 		flag.Usage()
 		os.Exit(1)
 	}
+	
+	// Handle deprecated sampleSize flag
+	if *sampleSizeFlag > 0 {
+		fmt.Println("Warning: --sample-size is deprecated, please use --limit instead")
+		*limit = *sampleSizeFlag
+	}
 
 	startTime := time.Now()
 
 	// Create API client
 	apiClient := NewApiClient(*workflowID, *debugFlag)
+	
+	// Print debug information if debug flag is enabled
+	if *debugFlag {
+		fmt.Println("Debug mode enabled: LLM inputs and outputs will be printed")
+	}
 
 	// Step 1: Determine intents to match
 	var intentsToMatch []string
@@ -88,7 +100,7 @@ func main() {
 	
 	for _, intent := range intentsToMatch {
 		// Fetch conversations with this intent
-		conversations, err := fetchConversationsByIntent(*dbPath, intent, *sampleSize)
+		conversations, err := fetchConversationsByIntent(*dbPath, intent, *limit)
 		if err != nil {
 			fmt.Printf("Error fetching conversations for intent '%s': %v\n", intent, err)
 			continue

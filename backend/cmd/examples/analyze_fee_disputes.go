@@ -43,6 +43,7 @@ func main() {
 	minCount := flag.Int("min-count", 10, "Minimum count for patterns to be considered significant")
 	workflowID := flag.String("workflow", "", "Workflow ID for persisting results")
 	debugFlag := flag.Bool("debug", false, "Enable debug output")
+	limit := flag.Int("limit", 100, "Maximum number of fee disputes to analyze")
 	flag.Parse()
 
 	// Validate required flags
@@ -56,9 +57,14 @@ func main() {
 
 	// Create API client
 	apiClient := NewApiClient(*workflowID, *debugFlag)
+	
+	// Print debug information if debug flag is enabled
+	if *debugFlag {
+		fmt.Println("Debug mode enabled: LLM inputs and outputs will be printed")
+	}
 
 	// Step 1: Fetch fee dispute conversations
-	disputes, err := fetchFeeDisputes(*dbPath, *minCount)
+	disputes, err := fetchFeeDisputes(*dbPath, *minCount, *limit)
 	if err != nil {
 		fmt.Printf("Error fetching fee disputes: %v\n", err)
 		os.Exit(1)
@@ -130,7 +136,7 @@ func main() {
 }
 
 // fetchFeeDisputes fetches fee dispute conversations from the database
-func fetchFeeDisputes(dbPath string, minCount int) ([]Dispute, error) {
+func fetchFeeDisputes(dbPath string, minCount int, limit int) ([]Dispute, error) {
 	// Connect to the database
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
@@ -171,7 +177,6 @@ func fetchFeeDisputes(dbPath string, minCount int) ([]Dispute, error) {
 		AND ca_intent.value LIKE '%dispute%'
 		AND c.text IS NOT NULL 
 		AND LENGTH(c.text) > 100
-	LIMIT 100
 	`
 
 	rows, err := db.Query(query)
@@ -182,6 +187,7 @@ func fetchFeeDisputes(dbPath string, minCount int) ([]Dispute, error) {
 
 	// Format disputes as objects
 	disputes := make([]Dispute, 0)
+	count := 0
 	for rows.Next() {
 		var dispute Dispute
 		var intentNullable, disputeTypeNullable, resolutionNullable, amountNullable, dateNullable sql.NullString
@@ -216,6 +222,12 @@ func fetchFeeDisputes(dbPath string, minCount int) ([]Dispute, error) {
 		}
 		
 		disputes = append(disputes, dispute)
+		
+		// Respect the limit exactly as specified
+		count++
+		if limit > 0 && count >= limit {
+			break
+		}
 	}
 
 	if err := rows.Err(); err != nil {

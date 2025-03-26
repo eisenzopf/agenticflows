@@ -165,7 +165,7 @@ function run_generate_attributes {
         --db "$DB_PATH" \
         --output "$OUTPUT_FILE" \
         --min-count "$MIN_COUNT" \
-        --sample-size "$SAMPLE_SIZE" \
+        --limit "$LIMIT" \
         --target-class "$TARGET_CLASS" \
         --threshold "$THRESHOLD" \
         --workflow "$WORKFLOW_ID" \
@@ -190,6 +190,7 @@ function run_group_intents {
         --output "$OUTPUT_FILE" \
         --min-count "$MIN_COUNT" \
         --max-groups 20 \
+        --limit "$LIMIT" \
         --workflow "$WORKFLOW_ID" \
         $DEBUG_FLAG
     
@@ -233,7 +234,7 @@ function run_match_intents {
         --db "$DB_PATH" \
         --output "$OUTPUT_FILE" \
         --intents "$INTENTS" \
-        --sample-size "$SAMPLE_SIZE" \
+        --limit "$LIMIT" \
         --threshold "$THRESHOLD" \
         --workflow "$WORKFLOW_ID" \
         $DEBUG_FLAG
@@ -256,6 +257,7 @@ function run_analyze_fee_disputes {
         --db "$DB_PATH" \
         --output "$OUTPUT_FILE" \
         --min-count "$MIN_COUNT" \
+        --limit "$LIMIT" \
         --workflow "$WORKFLOW_ID" \
         $DEBUG_FLAG
     

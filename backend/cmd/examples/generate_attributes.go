@@ -26,7 +26,8 @@ func main() {
 	// Define command-line flags
 	dbPath := flag.String("db", "", "Path to the SQLite database")
 	minCount := flag.Int("min-count", 20, "Minimum count for attributes to be considered")
-	sampleSize := flag.Int("sample-size", 3, "Number of sample conversations to analyze")
+	sampleSizeFlag := flag.Int("sample-size", 0, "DEPRECATED: Use --limit instead")
+	limit := flag.Int("limit", 3, "Number of sample conversations to analyze")
 	targetClass := flag.String("target-class", "fee dispute", "Target class for intent matching")
 	debugFlag := flag.Bool("debug", false, "Enable debug mode")
 	// Removing unused variables but keeping the flag definitions
@@ -41,11 +42,22 @@ func main() {
 		flag.Usage()
 		os.Exit(1)
 	}
+	
+	// Handle deprecated sampleSize flag
+	if *sampleSizeFlag > 0 {
+		fmt.Println("Warning: --sample-size is deprecated, please use --limit instead")
+		*limit = *sampleSizeFlag
+	}
 
 	startTime := time.Now()
 
 	// Create API client
 	apiClient := NewApiClient(*workflowID, *debugFlag)
+	
+	// Print debug information if debug flag is enabled
+	if *debugFlag {
+		fmt.Println("Debug mode enabled: LLM inputs and outputs will be printed")
+	}
 
 	// Step 1: Get required attributes
 	questions := []string{
@@ -57,27 +69,34 @@ func main() {
 	}
 
 	fmt.Println("Generating required attributes for fee dispute analysis...")
-	resp, err := apiClient.GenerateRequiredAttributes(questions, nil)
+	resp, err := apiClient.GenerateRequiredAttributes(questions, "")
 	if err != nil {
 		fmt.Printf("Error generating required attributes: %v\n", err)
 		os.Exit(1)
 	}
 
 	// Extract attributes from response
-	attrs, ok := resp["attributes"].([]interface{})
-	if !ok {
+	var attributes []map[string]interface{}
+	
+	// Try to extract as []interface{} first
+	if attrsInterface, ok := resp["attributes"].([]interface{}); ok {
+		attributes = make([]map[string]interface{}, 0, len(attrsInterface))
+		for _, attr := range attrsInterface {
+			if attrMap, ok := attr.(map[string]interface{}); ok {
+				attributes = append(attributes, attrMap)
+			}
+		}
+	} else if attrsMaps, ok := resp["attributes"].([]map[string]interface{}); ok {
+		// Try to extract directly as []map[string]interface{}
+		attributes = attrsMaps
+	} else {
 		fmt.Println("Error: Unexpected response format")
 		os.Exit(1)
 	}
-
+	
 	// Deduplicate attributes by field_name
 	requiredAttributes := make(map[string]map[string]string)
-	for _, attr := range attrs {
-		attrMap, ok := attr.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		
+	for _, attrMap := range attributes {
 		// Extract field_name and convert to string
 		fieldName, ok := attrMap["field_name"].(string)
 		if !ok || fieldName == "" {
@@ -170,15 +189,15 @@ func main() {
 		conversations := make([]Conversation, 0)
 		if len(matchingIntents) == 0 {
 			fmt.Printf("No intents matching '%s' were found. Using random conversations instead.\n", *targetClass)
-			conversations, err = fetchSampleConversations(*dbPath, *sampleSize)
+			conversations, err = fetchSampleConversations(*dbPath, *limit)
 			if err != nil {
 				fmt.Printf("Error fetching sample conversations: %v\n", err)
 				os.Exit(1)
 			}
 		} else {
 			// Step 5: Fetch conversations with matching intents
-			fmt.Printf("\nFetching %d conversations with '%s' intents...\n", *sampleSize, *targetClass)
-			conversations, err = fetchConversationsByIntents(*dbPath, matchingIntents, *sampleSize)
+			fmt.Printf("\nFetching %d conversations with '%s' intents...\n", *limit, *targetClass)
+			conversations, err = fetchConversationsByIntents(*dbPath, matchingIntents, *limit)
 			if err != nil {
 				fmt.Printf("Error fetching conversations by intents: %v\n", err)
 				os.Exit(1)
@@ -186,7 +205,7 @@ func main() {
 
 			if len(conversations) == 0 {
 				fmt.Println("No conversations with matching intents found. Using random conversations instead.")
-				conversations, err = fetchSampleConversations(*dbPath, *sampleSize)
+				conversations, err = fetchSampleConversations(*dbPath, *limit)
 				if err != nil {
 					fmt.Printf("Error fetching sample conversations: %v\n", err)
 					os.Exit(1)

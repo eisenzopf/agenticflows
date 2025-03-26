@@ -6,7 +6,7 @@
       "description": "The primary purpose or goal of the customer contact",
       "type": "string",
       "enum_values": [
-        "fee_inquiry"
+        "dispute_fee"
       ]
     },
     {
@@ -59,8 +59,8 @@
       "type": "boolean"
     }
   ],
-  "conversation_count": 1,
+  "conversation_count": 2,
   "intent_type": "fee dispute",
-  "timestamp": "2025-03-25T22:19:20-07:00",
-  "workflow_id": "example-20250325221917"
+  "timestamp": "2025-03-25T22:44:07-07:00",
+  "workflow_id": "example-20250325224355"
 }

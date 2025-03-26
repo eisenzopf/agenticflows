@@ -42,6 +42,11 @@ func main() {
 
 	// Create API client
 	apiClient := NewApiClient(*workflowID, *debugFlag)
+	
+	// Print debug information if debug flag is enabled
+	if *debugFlag {
+		fmt.Println("Debug mode enabled: LLM inputs and outputs will be printed")
+	}
 
 	// Step 1: Define analysis questions
 	questions := []string{

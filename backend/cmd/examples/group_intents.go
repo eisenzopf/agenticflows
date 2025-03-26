@@ -36,6 +36,7 @@ func main() {
 	minCount := flag.Int("min-count", 5, "Minimum count for intent groups")
 	maxGroups := flag.Int("max-groups", 20, "Maximum number of intent groups to generate")
 	workflowID := flag.String("workflow", "", "Workflow ID for persisting results")
+	limit := flag.Int("limit", 100, "Maximum number of intents to process")
 	debugFlag := flag.Bool("debug", false, "Enable debug output")
 	flag.Parse()
 
@@ -50,9 +51,14 @@ func main() {
 
 	// Create API client
 	apiClient := NewApiClient(*workflowID, *debugFlag)
+	
+	// Print debug information if debug flag is enabled
+	if *debugFlag {
+		fmt.Println("Debug mode enabled: LLM inputs and outputs will be printed")
+	}
 
 	// Step 1: Fetch intents from database
-	intents, err := fetchIntents(*dbPath, *minCount)
+	intents, err := fetchIntents(*dbPath, *minCount, *limit)
 	if err != nil {
 		fmt.Printf("Error fetching intents: %v\n", err)
 		os.Exit(1)
@@ -112,7 +118,7 @@ func main() {
 }
 
 // fetchIntents fetches intents from the database
-func fetchIntents(dbPath string, minCount int) (map[string]int, error) {
+func fetchIntents(dbPath string, minCount int, limit int) (map[string]int, error) {
 	// Connect to the database
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
@@ -140,11 +146,11 @@ func fetchIntents(dbPath string, minCount int) (map[string]int, error) {
 	intents := make(map[string]int)
 	for rows.Next() {
 		var intent string
-		var count int
-		if err := rows.Scan(&intent, &count); err != nil {
+		var intentCount int
+		if err := rows.Scan(&intent, &intentCount); err != nil {
 			return nil, fmt.Errorf("error scanning row: %w", err)
 		}
-		intents[intent] = count
+		intents[intent] = intentCount
 	}
 
 	if err := rows.Err(); err != nil {
@@ -380,36 +386,39 @@ func describeGroups(groups []IntentGroup, apiClient *ApiClient) {
 	fmt.Println("Generating descriptions for intent groups...")
 	
 	for i := range groups {
-		group := &groups[i]
-		
-		// Skip if there are no examples
-		if len(group.Examples) == 0 {
+		// Skip already described groups
+		if groups[i].Description != "" {
 			continue
 		}
 		
-		// Prepare examples for description generation
-		examplesStr := strings.Join(group.Examples[:int(math.Min(float64(len(group.Examples)), 5))], "\n- ")
+		// Prepare examples for the description
+		examples := make([]string, 0)
+		if len(groups[i].Examples) > 5 {
+			examples = groups[i].Examples[:5]
+		} else {
+			examples = groups[i].Examples
+		}
+		
+		// Skip if no examples
+		if len(examples) == 0 {
+			continue
+		}
 		
 		// Generate description
-		if apiClient != nil {
-			// Call API to generate description
-			resp, err := apiClient.DescribeIntentGroup(group.Name, examplesStr)
-			if err != nil {
-				fmt.Printf("Error generating description for group '%s': %v\n", group.Name, err)
-				group.Description = fmt.Sprintf("Group of %d intents related to %s", len(group.Examples), strings.ToLower(group.Name))
-				continue
-			}
-			
-			// Extract description from response
-			description, ok := resp["description"].(string)
-			if !ok || description == "" {
-				group.Description = fmt.Sprintf("Group of %d intents related to %s", len(group.Examples), strings.ToLower(group.Name))
-			} else {
-				group.Description = description
-			}
+		fmt.Printf("Request to describe_group:\n%s\n", groups[i].Name)
+		resp, err := apiClient.DescribeGroup(groups[i].Name, examples)
+		if err != nil {
+			fmt.Printf("Error generating description for group %s: %v\n", groups[i].Name, err)
+			groups[i].Description = fmt.Sprintf("This group contains conversations related to %s.", strings.ToLower(strings.TrimSuffix(groups[i].Name, " inquiries")))
+			continue
+		}
+		
+		// Extract description from response
+		description, ok := resp["description"].(string)
+		if !ok || description == "" {
+			groups[i].Description = fmt.Sprintf("This group contains conversations related to %s.", strings.ToLower(strings.TrimSuffix(groups[i].Name, " inquiries")))
 		} else {
-			// Generate a simple description
-			group.Description = fmt.Sprintf("Group of %d intents related to %s", len(group.Examples), strings.ToLower(group.Name))
+			groups[i].Description = description
 		}
 	}
 }
