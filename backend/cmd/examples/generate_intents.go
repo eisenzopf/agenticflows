@@ -246,10 +246,11 @@ func saveToDatabase(dbPath string, intents []Intent, workflowID string) bool {
 	}
 	
 	// Prepare insert statement for conversation_attributes
+	// Remove confidence, explanation, and workflow_id since those columns don't exist
 	stmt, err := tx.Prepare(`
 		INSERT INTO conversation_attributes 
-		(conversation_id, type, name, value, confidence, explanation, workflow_id) 
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		(conversation_id, type, name, value) 
+		VALUES (?, ?, ?, ?)
 	`)
 	if err != nil {
 		fmt.Printf("Error preparing statement: %v\n", err)
@@ -263,16 +264,8 @@ func saveToDatabase(dbPath string, intents []Intent, workflowID string) bool {
 		// Check if we have a conversation_id
 		conversationID := fmt.Sprintf("autogen_%d", i+1)
 		
-		// Execute the insert
-		_, err = stmt.Exec(
-			conversationID,
-			"intent",
-			"primary_intent",
-			intent.Intent,
-			intent.Confidence,
-			intent.Explanation,
-			workflowID,
-		)
+		// Execute the insert - removed confidence, explanation, and workflow_id parameters
+		_, err = stmt.Exec(conversationID, "intent", "primary_intent", intent.Intent)
 		
 		if err != nil {
 			fmt.Printf("Error inserting intent: %v\n", err)
