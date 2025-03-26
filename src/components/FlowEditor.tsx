@@ -54,6 +54,17 @@ const getNodeStyle = (type: string) => {
         fontWeight: 500,
         boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
       };
+    case 'function':
+      return { 
+        background: 'rgba(16, 185, 129, 0.1)', 
+        borderColor: '#10B981',
+        borderWidth: '2px',
+        padding: '10px',
+        borderRadius: '8px',
+        color: '#065F46',
+        fontWeight: 500,
+        boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
+      };
     default:
       return {};
   }

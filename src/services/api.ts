@@ -17,6 +17,14 @@ export interface ComponentItem {
   label: string;
 }
 
+export interface FunctionItem {
+  id: string;
+  type: string;
+  label: string;
+  endpoint: string;
+  description: string;
+}
+
 const API_URL = 'http://localhost:8080/api';
 
 export const api = {
@@ -39,6 +47,58 @@ export const api = {
     const tools = await toolsResponse.json();
     
     return { agents, tools };
+  },
+  
+  // Get all functions
+  getFunctions: async (): Promise<FunctionItem[]> => {
+    // Since we don't have an actual endpoint for functions yet, 
+    // we'll hard-code the available analysis endpoints
+    const functions: FunctionItem[] = [
+      {
+        id: 'analysis-trends',
+        type: 'function',
+        label: 'Analyze Trends',
+        endpoint: '/api/analysis/trends',
+        description: 'Analyze trends based on focus areas'
+      },
+      {
+        id: 'analysis-patterns',
+        type: 'function',
+        label: 'Identify Patterns',
+        endpoint: '/api/analysis/patterns',
+        description: 'Identify patterns based on pattern types'
+      },
+      {
+        id: 'analysis-findings',
+        type: 'function',
+        label: 'Analyze Findings',
+        endpoint: '/api/analysis/findings',
+        description: 'Analyze findings based on questions and attribute values'
+      },
+      {
+        id: 'analysis-attributes',
+        type: 'function',
+        label: 'Extract Attributes',
+        endpoint: '/api/analysis/attributes',
+        description: 'Extract attribute values from text or generate required attributes'
+      },
+      {
+        id: 'analysis-intent',
+        type: 'function',
+        label: 'Generate Intent',
+        endpoint: '/api/analysis/intent',
+        description: 'Generate intent from text'
+      },
+      {
+        id: 'analysis-results',
+        type: 'function',
+        label: 'Get Analysis Results',
+        endpoint: '/api/analysis/results',
+        description: 'Get or delete analysis results for a workflow'
+      }
+    ];
+    
+    return functions;
   },
   
   // Get all agents

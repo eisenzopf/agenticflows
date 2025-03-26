@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Plus, Pencil, Copy, Trash2, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { api, ComponentItem, WorkflowData } from '@/services/api';
+import { api, ComponentItem, WorkflowData, FunctionItem } from '@/services/api';
 
 // Define the workflow type
 interface Workflow {
@@ -18,6 +18,8 @@ const getComponentStyle = (type: string) => {
       return 'border-l-4 border-l-blue-400 bg-blue-50 dark:bg-blue-950/30 dark:border-l-blue-600';
     case 'tool':
       return 'border-l-4 border-l-amber-400 bg-amber-50 dark:bg-amber-950/30 dark:border-l-amber-600';
+    case 'function':
+      return 'border-l-4 border-l-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 dark:border-l-emerald-600';
     default:
       return '';
   }
@@ -33,6 +35,7 @@ export default function ComponentsPanel({ onSaveWorkflow, onLoadWorkflow, active
   const [isExpanded, setIsExpanded] = useState(true);
   const [agentComponents, setAgentComponents] = useState<ComponentItem[]>([]);
   const [toolComponents, setToolComponents] = useState<ComponentItem[]>([]);
+  const [functionComponents, setFunctionComponents] = useState<FunctionItem[]>([]);
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeWorkflow, setActiveWorkflow] = useState<string>(activeWorkflowId || '');
@@ -46,7 +49,8 @@ export default function ComponentsPanel({ onSaveWorkflow, onLoadWorkflow, active
   const [sectionsExpanded, setSectionsExpanded] = useState({
     workflows: true,
     agents: true,
-    tools: true
+    tools: true,
+    functions: true
   });
 
   useEffect(() => {
@@ -54,10 +58,14 @@ export default function ComponentsPanel({ onSaveWorkflow, onLoadWorkflow, active
     async function fetchData() {
       setIsLoading(true);
       try {
-        // Fetch components (agents and tools)
+        // Fetch components (agents, tools, and functions)
         const componentsData = await api.getComponents();
         setAgentComponents(componentsData.agents || []);
         setToolComponents(componentsData.tools || []);
+        
+        // Fetch functions
+        const functionsData = await api.getFunctions();
+        setFunctionComponents(functionsData || []);
         
         // Fetch workflows
         const workflowsData = await api.getWorkflows();
@@ -96,7 +104,7 @@ export default function ComponentsPanel({ onSaveWorkflow, onLoadWorkflow, active
     fetchData();
   }, []);
 
-  const toggleSection = (section: 'workflows' | 'agents' | 'tools') => {
+  const toggleSection = (section: 'workflows' | 'agents' | 'tools' | 'functions') => {
     setSectionsExpanded(prev => ({
       ...prev,
       [section]: !prev[section]
@@ -445,7 +453,7 @@ export default function ComponentsPanel({ onSaveWorkflow, onLoadWorkflow, active
           </div>
 
           {/* Tools Section */}
-          <div>
+          <div className="mb-4">
             <div 
               className="flex items-center justify-between cursor-pointer mb-2"
               onClick={() => toggleSection('tools')}
@@ -466,6 +474,37 @@ export default function ComponentsPanel({ onSaveWorkflow, onLoadWorkflow, active
                     draggable
                     onDragStart={(event) => onDragStart(event, component.type, component.label)}
                     className={`p-2.5 rounded shadow-sm cursor-move hover:shadow-md transition-all text-sm ${getComponentStyle(component.type)}`}
+                  >
+                    {component.label}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Functions Section */}
+          <div>
+            <div 
+              className="flex items-center justify-between cursor-pointer mb-2"
+              onClick={() => toggleSection('functions')}
+            >
+              <h3 className="font-medium text-sm text-emerald-600 dark:text-emerald-400">Functions</h3>
+              {sectionsExpanded.functions ? (
+                <ChevronUp size={16} className="text-muted-foreground" />
+              ) : (
+                <ChevronDown size={16} className="text-muted-foreground" />
+              )}
+            </div>
+            
+            {sectionsExpanded.functions && (
+              <div className="space-y-1.5">
+                {functionComponents.map((component) => (
+                  <div
+                    key={component.id}
+                    draggable
+                    onDragStart={(event) => onDragStart(event, component.type, component.label)}
+                    className={`p-2.5 rounded shadow-sm cursor-move hover:shadow-md transition-all text-sm ${getComponentStyle(component.type)}`}
+                    title={component.description}
                   >
                     {component.label}
                   </div>
