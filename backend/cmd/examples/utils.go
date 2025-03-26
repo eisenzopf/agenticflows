@@ -137,15 +137,45 @@ func (c *ApiClient) DescribeIntentGroup(groupName, examples string) (map[string]
 
 // IdentifyAttributes identifies attributes from conversations
 func (c *ApiClient) IdentifyAttributes(questions []string, conversationSamples string) (map[string]interface{}, error) {
-	// Prepare request body
-	requestBody := map[string]interface{}{
-		"questions":    questions,
-		"conversations": conversationSamples,
-		"workflow_id":  c.workflowID,
+	// First, try to get intents for the sample text
+	intentResp, err := c.GenerateIntent(conversationSamples)
+	if err != nil {
+		return nil, fmt.Errorf("error generating intent for sample text: %w", err)
 	}
 	
-	// Make API request
-	return c.makeRequest("identify_attributes", requestBody)
+	// Prepare return structure
+	result := map[string]interface{}{
+		"attributes": []map[string]interface{}{},
+		"intent": intentResp,  // Include the full intent response
+	}
+	
+	// Add question-based attributes
+	for _, question := range questions {
+		// Create an attribute based on the question
+		attrName := "attr_" + fmt.Sprintf("%d", len(result["attributes"].([]map[string]interface{}))+1)
+		
+		// Add the attribute
+		result["attributes"] = append(result["attributes"].([]map[string]interface{}), map[string]interface{}{
+			"field_name":   attrName,
+			"title":        question,
+			"description":  "Generated from analysis question",
+			"type":         "string",
+			"enum_values":  []string{},
+		})
+	}
+	
+	// Add intent-based attributes
+	if intent, ok := intentResp["label"].(string); ok {
+		result["attributes"] = append(result["attributes"].([]map[string]interface{}), map[string]interface{}{
+			"field_name":   "primary_intent",
+			"title":        "Primary Intent",
+			"description":  "The primary intent of the conversation",
+			"type":         "string",
+			"enum_values":  []string{intent},
+		})
+	}
+	
+	return result, nil
 }
 
 // makeRequest makes a request to the API

@@ -205,23 +205,23 @@ function run_group_intents {
 # Run identify_attributes script
 function run_identify_attributes {
     echo -e "${GREEN}Running identify_attributes script...${NC}"
-    OUTPUT_FILE="$OUTPUT_DIR/attribute_definitions_$(date +%Y%m%d%H%M%S).json"
     
-    go run utils.go identify_attributes.go \
+    # Run the script
+    go run identify_attributes.go utils.go \
         --db "$DB_PATH" \
-        --output "$OUTPUT_FILE" \
+        --output "$OUTPUT_DIR/attribute_definitions.json" \
         --intent "$TARGET_CLASS" \
-        --limit "$LIMIT" \
         --workflow "$WORKFLOW_ID" \
-        $DEBUG_FLAG
+        --limit "$LIMIT" $DEBUG_FLAG
     
+    # Check if the script ran successfully
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}✓ identify_attributes completed successfully${NC}"
-        echo -e "  Output: $OUTPUT_FILE"
+        return 0
     else
         echo -e "${RED}✗ identify_attributes failed${NC}"
+        return 1
     fi
-    echo ""
 }
 
 # Run match_intents script
