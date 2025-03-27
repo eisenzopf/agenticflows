@@ -111,8 +111,8 @@ export default function ComponentsPanel({ onSaveWorkflow, onLoadWorkflow, active
     }));
   };
 
-  const onDragStart = (event: React.DragEvent<HTMLDivElement>, nodeType: string, nodeLabel: string) => {
-    const data = JSON.stringify({ type: nodeType, label: nodeLabel });
+  const onDragStart = (event: React.DragEvent<HTMLDivElement>, nodeType: string, nodeLabel: string, nodeId?: string) => {
+    const data = JSON.stringify({ type: nodeType, label: nodeLabel, id: nodeId });
     event.dataTransfer.setData('application/reactflow', data);
     event.dataTransfer.effectAllowed = 'move';
   };
@@ -502,7 +502,7 @@ export default function ComponentsPanel({ onSaveWorkflow, onLoadWorkflow, active
                   <div
                     key={component.id}
                     draggable
-                    onDragStart={(event) => onDragStart(event, component.type, component.label)}
+                    onDragStart={(event) => onDragStart(event, component.type, component.label, component.id)}
                     className={`p-2.5 rounded shadow-sm cursor-move hover:shadow-md transition-all text-sm ${getComponentStyle(component.type)}`}
                     title={component.description}
                   >

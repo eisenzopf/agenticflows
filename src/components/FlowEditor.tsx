@@ -13,10 +13,12 @@ import ReactFlow, {
   XYPosition,
   ConnectionLineType,
   Position,
+  NodeMouseHandler,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import ComponentsPanel from './ComponentsPanel';
-import { api } from '@/services/api';
+import FunctionSettingsPanel from './FunctionSettingsPanel';
+import { api, FunctionItem } from '@/services/api';
 
 // Start with an empty canvas
 const initialNodes: Node[] = [];
@@ -93,6 +95,23 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [activeWorkflowId, setActiveWorkflowId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [selectedNode, setSelectedNode] = useState<Node | null>(null);
+  const [selectedFunction, setSelectedFunction] = useState<FunctionItem | null>(null);
+  const [functionComponents, setFunctionComponents] = useState<FunctionItem[]>([]);
+
+  // Fetch function components when component mounts
+  useEffect(() => {
+    async function fetchFunctions() {
+      try {
+        const functions = await api.getFunctions();
+        setFunctionComponents(functions);
+      } catch (error) {
+        console.error("Error fetching functions:", error);
+      }
+    }
+    
+    fetchFunctions();
+  }, []);
 
   // Apply horizontal orientation to any nodes
   const ensureHorizontalOrientation = useCallback((nodes: Node[]) => {
@@ -134,6 +153,72 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
     
     fetchInitialWorkflow();
   }, [reactFlowInstance]);
+
+  // Handle node click to show the settings panel
+  const onNodeClick: NodeMouseHandler = useCallback((event, node) => {
+    // Get the node type from data
+    const nodeType = node.data?.nodeType || node.type;
+    
+    if (nodeType === 'function') {
+      // For function nodes, we need to find the corresponding function item
+      const functionId = node.data?.functionId;
+      
+      if (functionId) {
+        const functionItem = functionComponents.find(f => f.id === functionId);
+        if (functionItem) {
+          setSelectedFunction(functionItem);
+          setSelectedNode(node);
+          return;
+        }
+      }
+      
+      // Fallback to trying to extract from node ID if functionId not in data
+      const extractedId = node.id.startsWith('function-') 
+        ? node.id.replace(/^function-\d+/, 'analysis') 
+        : null;
+        
+      if (extractedId) {
+        // Try to find by extracted ID
+        const functionItem = functionComponents.find(f => 
+          f.id.includes(extractedId) || extractedId.includes(f.id.split('-')[1])
+        );
+        
+        if (functionItem) {
+          setSelectedFunction(functionItem);
+          setSelectedNode(node);
+          return;
+        }
+      }
+      
+      // Last resort: try to match by label
+      if (node.data?.label) {
+        const functionItem = functionComponents.find(f => 
+          f.label.toLowerCase() === node.data.label.toLowerCase()
+        );
+        
+        if (functionItem) {
+          setSelectedFunction(functionItem);
+          setSelectedNode(node);
+          return;
+        }
+      }
+    } else {
+      // For other node types, just set the selected node
+      setSelectedNode(node);
+      setSelectedFunction(null);
+    }
+  }, [functionComponents]);
+
+  // Handle background click to deselect nodes
+  const onPaneClick = useCallback(() => {
+    setSelectedNode(null);
+    setSelectedFunction(null);
+  }, []);
+
+  // Close the function settings panel
+  const closeFunctionSettings = useCallback(() => {
+    setSelectedFunction(null);
+  }, []);
 
   // Load workflow by ID from the backend API
   const loadWorkflow = useCallback(async (workflowId: string) => {
@@ -274,7 +359,7 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
       if (!dataStr) return;
 
       try {
-        const { type, label } = JSON.parse(dataStr);
+        const { type, label, id } = JSON.parse(dataStr);
         
         // Get drop position in the canvas
         const position: XYPosition = reactFlowInstance.project({
@@ -282,12 +367,28 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
           y: event.clientY - reactFlowBounds.top,
         });
 
+        // For function nodes, use the id from drag data if available
+        let functionId = id;
+        
+        // If no id was provided and it's a function, try to find by label
+        if (!functionId && type === 'function') {
+          const functionItem = functionComponents.find(f => f.label === label);
+          functionId = functionItem?.id;
+        }
+
+        // Create a unique node ID
+        const nodeId = `${type}-${Date.now()}`;
+
         // Create a new node
         const newNode: Node = {
-          id: `${type}-${Date.now()}`,
+          id: nodeId,
           type: 'default',
           position,
-          data: { label },
+          data: { 
+            label,
+            nodeType: type,
+            functionId
+          },
           style: getNodeStyle(type),
           // Set source handles on the right, target handles on the left for horizontal flow
           sourcePosition: Position.Right,
@@ -299,7 +400,7 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
         console.error('Error adding new node:', error);
       }
     },
-    [reactFlowInstance, setNodes]
+    [reactFlowInstance, setNodes, functionComponents]
   );
   
   // Memoize connectionLineStyle to prevent recreation on each render
@@ -318,7 +419,13 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
       <div 
         className="reactflow-wrapper" 
         ref={reactFlowWrapper} 
-        style={{ width: '100%', height: '100%', marginLeft: '64px' }}
+        style={{ 
+          width: '100%', 
+          height: '100%', 
+          marginLeft: '64px', 
+          marginRight: selectedFunction ? '380px' : '0', 
+          transition: 'margin-right 0.3s ease-in-out'
+        }}
       >
         <ReactFlow
           nodes={nodes}
@@ -329,6 +436,8 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
           onInit={setReactFlowInstance}
           onDrop={onDrop}
           onDragOver={onDragOver}
+          onNodeClick={onNodeClick}
+          onPaneClick={onPaneClick}
           defaultViewport={defaultViewport}
           minZoom={0.5}
           maxZoom={4}
@@ -346,6 +455,25 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
           <Background color="#aaa" gap={16} />
         </ReactFlow>
       </div>
+
+      {selectedFunction && (
+        <div 
+          style={{ 
+            position: 'absolute', 
+            top: 0, 
+            right: 0, 
+            height: '100%', 
+            width: '380px',
+            zIndex: 10,
+            boxShadow: '-2px 0px 10px rgba(0,0,0,0.1)'
+          }}
+        >
+          <FunctionSettingsPanel 
+            selectedFunction={selectedFunction} 
+            onClose={closeFunctionSettings} 
+          />
+        </div>
+      )}
     </div>
   );
 });
