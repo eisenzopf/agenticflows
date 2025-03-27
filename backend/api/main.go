@@ -47,6 +47,9 @@ func main() {
 		// New unified endpoint
 		http.HandleFunc("/api/analysis", analysisHandler.handleAnalysis)
 
+		// Chain analysis endpoint for workflows
+		http.HandleFunc("/api/analysis/chain", analysisHandler.handleChainAnalysis)
+
 		// Legacy endpoints (kept for backward compatibility)
 		/*http.HandleFunc("/api/analysis/trends", analysisHandler.handleAnalysisTrends)
 		http.HandleFunc("/api/analysis/patterns", analysisHandler.handleAnalysisPatterns)

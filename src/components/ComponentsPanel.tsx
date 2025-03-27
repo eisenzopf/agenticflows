@@ -112,8 +112,15 @@ export default function ComponentsPanel({ onSaveWorkflow, onLoadWorkflow, active
   };
 
   const onDragStart = (event: React.DragEvent<HTMLDivElement>, nodeType: string, nodeLabel: string, nodeId?: string) => {
-    const data = JSON.stringify({ type: nodeType, label: nodeLabel, id: nodeId });
-    event.dataTransfer.setData('application/reactflow', data);
+    // Create data object with function information
+    const data = {
+      type: nodeType,
+      label: nodeLabel,
+      id: nodeId
+    };
+    
+    // Set the drag data
+    event.dataTransfer.setData('application/reactflow', JSON.stringify(data));
     event.dataTransfer.effectAllowed = 'move';
   };
 

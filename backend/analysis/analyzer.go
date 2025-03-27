@@ -599,3 +599,403 @@ Format your response as JSON with these fields:
 
 	return finalGroups, nil
 }
+
+// TransformForTrends prepares data for trend analysis by standardizing format
+func (a *Analyzer) TransformForTrends(data interface{}) (map[string]interface{}, error) {
+	// Convert input data to the format expected by AnalyzeTrends
+	result := make(map[string]interface{})
+
+	// Handle different input types
+	switch v := data.(type) {
+	case map[string]interface{}:
+		// If it's already a map, check if it has the right structure
+		result = v
+	case []map[string]interface{}:
+		// If it's an array of maps, convert to attribute_values
+		result["attribute_values"] = v
+	case string:
+		// If it's a string, try to parse as JSON
+		if err := json.Unmarshal([]byte(v), &result); err != nil {
+			// If parsing fails, treat as raw text
+			result["text"] = v
+		}
+	default:
+		// For other types, try to marshal and unmarshal
+		bytes, err := json.Marshal(data)
+		if err != nil {
+			return nil, fmt.Errorf("failed to transform data: %w", err)
+		}
+		if err := json.Unmarshal(bytes, &result); err != nil {
+			return nil, fmt.Errorf("failed to transform data: %w", err)
+		}
+	}
+
+	return result, nil
+}
+
+// ExtractTrendsOutput extracts the most relevant information from trends analysis
+func (a *Analyzer) ExtractTrendsOutput(resp *AnalysisResponse) (map[string]interface{}, error) {
+	if resp == nil || resp.Results == nil {
+		return nil, fmt.Errorf("no results to extract")
+	}
+
+	// Extract results as map
+	resultsMap, ok := resp.Results.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("unexpected results format")
+	}
+
+	// Extract trends and overall insights
+	output := make(map[string]interface{})
+
+	// Extract trends
+	if trends, ok := resultsMap["trends"].([]interface{}); ok {
+		trendDescriptions := make([]string, 0)
+
+		for _, t := range trends {
+			if trend, ok := t.(map[string]interface{}); ok {
+				// Extract trend description
+				trendStr, _ := trend["trend"].(string)
+				if trendStr != "" {
+					trendDescriptions = append(trendDescriptions, trendStr)
+				}
+			}
+		}
+
+		output["trend_descriptions"] = trendDescriptions
+	}
+
+	// Extract overall insights
+	if insights, ok := resultsMap["overall_insights"].([]interface{}); ok {
+		insightsList := make([]string, 0)
+
+		for _, i := range insights {
+			if insight, ok := i.(string); ok && insight != "" {
+				insightsList = append(insightsList, insight)
+			}
+		}
+
+		output["recommended_actions"] = insightsList
+	}
+
+	// Include confidence from the response
+	output["confidence"] = resp.Confidence
+
+	return output, nil
+}
+
+// TransformForPatterns prepares data for pattern identification
+func (a *Analyzer) TransformForPatterns(data interface{}, patternTypes []string) (map[string]interface{}, error) {
+	// Convert input data to the format expected by IdentifyPatterns
+	result := make(map[string]interface{})
+
+	// Handle different input types
+	switch v := data.(type) {
+	case map[string]interface{}:
+		// If it's already a map, use it directly
+		result = v
+	case []map[string]interface{}:
+		// If it's an array of maps, convert to attribute_values
+		result["attribute_values"] = v
+	default:
+		// For other types, try to marshal and unmarshal
+		bytes, err := json.Marshal(data)
+		if err != nil {
+			return nil, fmt.Errorf("failed to transform data: %w", err)
+		}
+		if err := json.Unmarshal(bytes, &result); err != nil {
+			return nil, fmt.Errorf("failed to transform data: %w", err)
+		}
+	}
+
+	// Add pattern types if not already present
+	if _, ok := result["pattern_types"]; !ok && len(patternTypes) > 0 {
+		result["pattern_types"] = patternTypes
+	}
+
+	return result, nil
+}
+
+// ExtractPatternsOutput extracts and simplifies patterns from the analysis
+func (a *Analyzer) ExtractPatternsOutput(resp *AnalysisResponse) ([]string, error) {
+	if resp == nil || resp.Results == nil {
+		return nil, fmt.Errorf("no results to extract")
+	}
+
+	// Extract results as map
+	resultsMap, ok := resp.Results.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("unexpected results format")
+	}
+
+	// Extract patterns
+	patterns := make([]string, 0)
+
+	if patternList, ok := resultsMap["patterns"].([]interface{}); ok {
+		for _, p := range patternList {
+			if pattern, ok := p.(map[string]interface{}); ok {
+				// Extract pattern description
+				if desc, ok := pattern["pattern_description"].(string); ok && desc != "" {
+					patterns = append(patterns, desc)
+				}
+			}
+		}
+	}
+
+	return patterns, nil
+}
+
+// TransformForFindings prepares data for findings analysis
+func (a *Analyzer) TransformForFindings(data interface{}, questions []string, trendsData map[string]interface{}, patternsData []string) (map[string]interface{}, error) {
+	// Convert input data to the format expected by AnalyzeFindings
+	result := make(map[string]interface{})
+
+	// Handle different input types for the base data
+	switch v := data.(type) {
+	case map[string]interface{}:
+		// If it's already a map, use it directly
+		result = v
+	case []map[string]interface{}:
+		// If it's an array of maps, add as disputes
+		result["disputes"] = v
+	default:
+		// For other types, try to marshal and unmarshal
+		bytes, err := json.Marshal(data)
+		if err != nil {
+			return nil, fmt.Errorf("failed to transform data: %w", err)
+		}
+		if err := json.Unmarshal(bytes, &result); err != nil {
+			return nil, fmt.Errorf("failed to transform data: %w", err)
+		}
+	}
+
+	// Add questions if provided
+	if len(questions) > 0 {
+		result["questions"] = questions
+	}
+
+	// Add trends data if provided
+	if trendsData != nil && len(trendsData) > 0 {
+		result["trends"] = trendsData
+	}
+
+	// Add patterns data if provided
+	if len(patternsData) > 0 {
+		result["patterns"] = patternsData
+	}
+
+	return result, nil
+}
+
+// ExtractFindingsOutput extracts findings and recommendations
+func (a *Analyzer) ExtractFindingsOutput(resp *AnalysisResponse) ([]string, []string, error) {
+	if resp == nil || resp.Results == nil {
+		return nil, nil, fmt.Errorf("no results to extract")
+	}
+
+	// Extract results as map
+	resultsMap, ok := resp.Results.(map[string]interface{})
+	if !ok {
+		return nil, nil, fmt.Errorf("unexpected results format")
+	}
+
+	// Extract findings and recommendations
+	findings := make([]string, 0)
+	recommendations := make([]string, 0)
+
+	// Try to extract from "answers" field (standard format)
+	if answers, ok := resultsMap["answers"].([]interface{}); ok {
+		for _, a := range answers {
+			if answer, ok := a.(map[string]interface{}); ok {
+				if answerText, ok := answer["answer"].(string); ok && answerText != "" {
+					findings = append(findings, answerText)
+				}
+			}
+		}
+	}
+
+	// Try to extract from "findings" field (alternate format)
+	if findingsData, ok := resultsMap["findings"].([]interface{}); ok {
+		for _, f := range findingsData {
+			if finding, ok := f.(string); ok && finding != "" {
+				findings = append(findings, finding)
+			}
+		}
+	}
+
+	// Extract recommendations
+	if recsData, ok := resultsMap["recommendations"].([]interface{}); ok {
+		for _, r := range recsData {
+			if rec, ok := r.(string); ok && rec != "" {
+				recommendations = append(recommendations, rec)
+			}
+		}
+	}
+
+	return findings, recommendations, nil
+}
+
+// ChainAnalysis performs a complete analysis chain combining multiple analysis steps
+func (a *Analyzer) ChainAnalysis(ctx context.Context, inputData interface{}, config map[string]interface{}) (map[string]interface{}, error) {
+	result := make(map[string]interface{})
+
+	// Extract configuration options
+	focusAreas, _ := extractStringSlice(config, "focus_areas")
+	patternTypes, _ := extractStringSlice(config, "pattern_types")
+	questions, _ := extractStringSlice(config, "questions")
+	useAttributes, _ := config["use_attributes"].(bool)
+
+	// Step 1: If attribute extraction is enabled and we have text input
+	if useAttributes {
+		if textInput, ok := inputData.(string); ok && textInput != "" {
+			// Create attribute extraction request
+			attributesReq := AnalysisRequest{
+				Text: textInput,
+			}
+
+			// Extract attributes
+			attributesResp, err := a.ExtractAttributes(ctx, attributesReq)
+			if err != nil {
+				return nil, fmt.Errorf("attribute extraction failed: %w", err)
+			}
+
+			// Use attributes result as input to next step
+			inputData = attributesResp.Results
+			result["attributes"] = attributesResp.Results
+		}
+	}
+
+	// Step 2: Trends Analysis
+	if len(focusAreas) > 0 {
+		// Transform data for trends analysis
+		trendsInput, err := a.TransformForTrends(inputData)
+		if err != nil {
+			return nil, fmt.Errorf("data transformation for trends failed: %w", err)
+		}
+
+		// Create trends request
+		trendsReq := AnalysisRequest{
+			FocusAreas:      focusAreas,
+			AttributeValues: trendsInput,
+		}
+
+		// Perform trends analysis
+		trendsResp, err := a.AnalyzeTrends(ctx, trendsReq)
+		if err != nil {
+			return nil, fmt.Errorf("trends analysis failed: %w", err)
+		}
+
+		// Extract and format trends output
+		trendsOutput, err := a.ExtractTrendsOutput(trendsResp)
+		if err != nil {
+			return nil, fmt.Errorf("extracting trends output failed: %w", err)
+		}
+
+		result["trends"] = trendsOutput
+	}
+
+	// Step 3: Pattern Analysis
+	if len(patternTypes) > 0 {
+		// Transform data for pattern analysis
+		patternsInput, err := a.TransformForPatterns(inputData, patternTypes)
+		if err != nil {
+			return nil, fmt.Errorf("data transformation for patterns failed: %w", err)
+		}
+
+		// Create patterns request
+		patternsReq := AnalysisRequest{
+			PatternTypes:    patternTypes,
+			AttributeValues: patternsInput,
+		}
+
+		// Perform pattern analysis
+		patternsResp, err := a.IdentifyPatterns(ctx, patternsReq)
+		if err != nil {
+			return nil, fmt.Errorf("pattern analysis failed: %w", err)
+		}
+
+		// Extract and format patterns output
+		patternsOutput, err := a.ExtractPatternsOutput(patternsResp)
+		if err != nil {
+			return nil, fmt.Errorf("extracting patterns output failed: %w", err)
+		}
+
+		result["patterns"] = patternsOutput
+	}
+
+	// Step 4: Findings Analysis
+	if len(questions) > 0 {
+		// Get trends data if available
+		var trendsData map[string]interface{}
+		if trends, ok := result["trends"].(map[string]interface{}); ok {
+			trendsData = trends
+		}
+
+		// Get patterns data if available
+		var patternsData []string
+		if patterns, ok := result["patterns"].([]string); ok {
+			patternsData = patterns
+		}
+
+		// Transform data for findings analysis
+		findingsInput, err := a.TransformForFindings(inputData, questions, trendsData, patternsData)
+		if err != nil {
+			return nil, fmt.Errorf("data transformation for findings failed: %w", err)
+		}
+
+		// Create findings request
+		findingsReq := AnalysisRequest{
+			Questions:       questions,
+			AttributeValues: findingsInput,
+		}
+
+		// Perform findings analysis
+		findingsResp, err := a.AnalyzeFindings(ctx, findingsReq)
+		if err != nil {
+			return nil, fmt.Errorf("findings analysis failed: %w", err)
+		}
+
+		// Extract and format findings output
+		findingsOutput, recommendationsOutput, err := a.ExtractFindingsOutput(findingsResp)
+		if err != nil {
+			return nil, fmt.Errorf("extracting findings output failed: %w", err)
+		}
+
+		result["findings"] = findingsOutput
+		result["recommendations"] = recommendationsOutput
+	}
+
+	return result, nil
+}
+
+// Helper function to extract string slice from config map
+func extractStringSlice(config map[string]interface{}, key string) ([]string, error) {
+	if val, ok := config[key]; ok {
+		switch v := val.(type) {
+		case []string:
+			return v, nil
+		case []interface{}:
+			result := make([]string, 0, len(v))
+			for _, item := range v {
+				if s, ok := item.(string); ok {
+					result = append(result, s)
+				}
+			}
+			return result, nil
+		default:
+			return nil, fmt.Errorf("invalid type for %s", key)
+		}
+	}
+	return []string{}, nil
+}
+
+// ExtractAttributes is a placeholder for attribute extraction functionality
+// In a complete implementation, this would extract attributes from text
+func (a *Analyzer) ExtractAttributes(ctx context.Context, req AnalysisRequest) (*AnalysisResponse, error) {
+	// This is a placeholder - in a real implementation, this would call
+	// the appropriate attribute extraction logic
+	return &AnalysisResponse{
+		Results:    map[string]interface{}{"attribute_values": map[string]string{}},
+		Confidence: 0.8,
+	}, nil
+}

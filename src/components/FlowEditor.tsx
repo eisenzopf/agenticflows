@@ -172,15 +172,24 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
         }
       }
       
-      // Fallback to trying to extract from node ID if functionId not in data
-      const extractedId = node.id.startsWith('function-') 
-        ? node.id.replace(/^function-\d+/, 'analysis') 
-        : null;
-        
-      if (extractedId) {
-        // Try to find by extracted ID
+      // Extract function ID from node ID or data
+      let extractedId = null;
+      
+      // Try to extract from node ID if it has a prefix like "function-"
+      if (node.id.includes('function-')) {
+        // Get the part after "function-" prefix and before any potential numbering
+        const match = node.id.match(/function-([^-\d]+)/);
+        if (match && match[1]) {
+          extractedId = `analysis-${match[1]}`;
+        }
+      }
+      
+      // If we couldn't extract from ID, try to extract from label
+      if (!extractedId && node.data?.label) {
+        const label = node.data.label.toLowerCase();
+        // Find function with matching label or name
         const functionItem = functionComponents.find(f => 
-          f.id.includes(extractedId) || extractedId.includes(f.id.split('-')[1])
+          f.label.toLowerCase() === label
         );
         
         if (functionItem) {
@@ -190,12 +199,9 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
         }
       }
       
-      // Last resort: try to match by label
-      if (node.data?.label) {
-        const functionItem = functionComponents.find(f => 
-          f.label.toLowerCase() === node.data.label.toLowerCase()
-        );
-        
+      // Try to find by extracted ID
+      if (extractedId) {
+        const functionItem = functionComponents.find(f => f.id === extractedId);
         if (functionItem) {
           setSelectedFunction(functionItem);
           setSelectedNode(node);
