@@ -20,6 +20,7 @@ const functionMetadata: Record<string, {
   inputs: { name: string; type: string; required: boolean; description: string }[];
   outputs: { name: string; type: string; description: string }[];
   example?: string;
+  responseExample?: string;
 }> = {
   'analysis-trends': {
     inputs: [
@@ -37,6 +38,37 @@ const functionMetadata: Record<string, {
     "sentiments": [{"id": 1, "value": "positive"}, ...],
     "response_times": [{"id": 1, "value": 120}, ...]
   }
+}`,
+    responseExample: `{
+  "trends": [
+    {
+      "focus_area": "customer satisfaction",
+      "trend": "Increasing positivity in customer feedback",
+      "supporting_data": {
+        "sentiment_scores": [0.2, 0.4, 0.6, 0.7],
+        "time_periods": ["Q1", "Q2", "Q3", "Q4"]
+      },
+      "confidence": 0.85
+    },
+    {
+      "focus_area": "response time",
+      "trend": "Decreasing average resolution time",
+      "supporting_data": {
+        "average_times": [45, 42, 38, 32],
+        "time_periods": ["Q1", "Q2", "Q3", "Q4"]
+      },
+      "confidence": 0.92
+    }
+  ],
+  "overall_insights": [
+    "Customer satisfaction is improving consistently",
+    "Response times have decreased by 29% over the last year",
+    "Issue resolution rates show positive correlation with satisfaction scores"
+  ],
+  "data_quality": {
+    "completeness": 0.87,
+    "limitations": ["Limited data for enterprise customers", "Seasonal variations not fully accounted for"]
+  }
 }`
   },
   'analysis-patterns': {
@@ -53,6 +85,31 @@ const functionMetadata: Record<string, {
   "attribute_values": {
     "intents": ["check status", "report issue", "cancel order", ...]
   }
+}`,
+    responseExample: `{
+  "patterns": [
+    {
+      "type": "user behavior",
+      "description": "Users frequently check order status multiple times within an hour",
+      "occurrences": 487,
+      "examples": ["User #1242 checked status 6 times", "User #2155 checked status 4 times"],
+      "significance": 0.78
+    },
+    {
+      "type": "error frequency",
+      "description": "Payment processing errors peak on Monday mornings",
+      "occurrences": 142,
+      "examples": ["Error #4011 on Monday 9:15 AM", "Error #4011 on Monday 8:45 AM"],
+      "significance": 0.85
+    }
+  ],
+  "unexpected_patterns": [
+    {
+      "description": "High rate of cart abandonment after successful coupon application",
+      "potential_causes": ["UI confusion", "Expected larger discount", "Changed mind about purchase"],
+      "significance": 0.65
+    }
+  ]
 }`
   },
   'analysis-findings': {
@@ -70,6 +127,45 @@ const functionMetadata: Record<string, {
     "complaints": ["slow response", "product quality", ...],
     "response_times": [{"date": "2023-01", "time": 45}, ...]
   }
+}`,
+    responseExample: `{
+  "answers": [
+    {
+      "question": "What are the most common customer complaints?",
+      "answer": "The most common customer complaints relate to product delivery delays and inconsistent quality control",
+      "metrics": {
+        "delivery_complaints": 42.7,
+        "quality_complaints": 31.2,
+        "support_complaints": 18.5,
+        "pricing_complaints": 7.6
+      },
+      "confidence": 0.89,
+      "supporting_data": {
+        "sample_size": 2456,
+        "time_period": "Last 6 months"
+      }
+    },
+    {
+      "question": "How has response time changed over time?",
+      "answer": "Response times have steadily improved by approximately 15% quarterly over the past year",
+      "metrics": {
+        "q1_avg_minutes": 42,
+        "q2_avg_minutes": 36,
+        "q3_avg_minutes": 31,
+        "q4_avg_minutes": 26
+      },
+      "confidence": 0.93,
+      "supporting_data": {
+        "total_tickets": 12845,
+        "methodology": "Average time to first response"
+      }
+    }
+  ],
+  "data_gaps": [
+    "Insufficient data for enterprise customer segment",
+    "Limited historical data beyond 18 months",
+    "Inconsistent categorization of complaints before Q2"
+  ]
 }`
   },
   'analysis-attributes': {
@@ -88,6 +184,38 @@ const functionMetadata: Record<string, {
   "attributes": [
     {"field_name": "order_id", "title": "Order ID", "description": "The order number mentioned"}
   ]
+}`,
+    responseExample: `{
+  "attribute_values": {
+    "order_id": "12345",
+    "delay_duration": "2 days",
+    "issue_type": "delivery delay",
+    "customer_sentiment": "frustrated",
+    "priority": "medium"
+  },
+  "attributes": [
+    {
+      "field_name": "order_id",
+      "title": "Order ID",
+      "description": "The order number mentioned",
+      "value_type": "string",
+      "confidence": 0.98
+    },
+    {
+      "field_name": "delay_duration",
+      "title": "Delay Duration",
+      "description": "How long the order was delayed",
+      "value_type": "duration",
+      "confidence": 0.95
+    },
+    {
+      "field_name": "issue_type",
+      "title": "Issue Type",
+      "description": "Category of the customer issue",
+      "value_type": "category",
+      "confidence": 0.87
+    }
+  ]
 }`
   },
   'analysis-intent': {
@@ -101,6 +229,108 @@ const functionMetadata: Record<string, {
     ],
     example: `{
   "text": "I'd like to check on the status of my order #AB123"
+}`,
+    responseExample: `{
+  "label_name": "order_status_inquiry",
+  "label": "Order Status Inquiry",
+  "description": "Customer is asking about the current status of their existing order",
+  "confidence": 0.94,
+  "extracted_entities": {
+    "order_id": "AB123"
+  },
+  "alternative_intents": [
+    {
+      "label_name": "order_tracking",
+      "confidence": 0.68
+    },
+    {
+      "label_name": "delivery_inquiry",
+      "confidence": 0.42
+    }
+  ]
+}`
+  },
+  'analysis-chain': {
+    inputs: [
+      { name: 'input_data', type: 'string | object', required: true, description: 'Text or structured data to analyze' },
+      { name: 'config', type: 'object', required: true, description: 'Configuration for the chain analysis' },
+      { name: 'workflow_id', type: 'string', required: false, description: 'ID of the workflow to save results to' }
+    ],
+    outputs: [
+      { name: 'results', type: 'object', description: 'Combined results from all analysis steps' },
+      { name: 'meta', type: 'object', description: 'Metadata about the analysis process' }
+    ],
+    example: `{
+  "input_data": "Customer messaged about their recent purchase: 'I ordered the premium headphones two weeks ago and they still haven't arrived. The tracking hasn't updated in 5 days. This is very frustrating as I needed them for an upcoming trip.'",
+  "config": {
+    "use_attributes": true,
+    "focus_areas": ["delivery experience", "customer satisfaction"],
+    "pattern_types": ["delivery issues", "communication gaps"],
+    "questions": ["What is the customer's main concern?", "How urgent is this issue?"]
+  },
+  "workflow_id": "workflow-1234"
+}`,
+    responseExample: `{
+  "results": {
+    "attributes": {
+      "product": "premium headphones",
+      "order_age": "two weeks",
+      "tracking_status": "stalled",
+      "tracking_last_updated": "5 days ago",
+      "customer_sentiment": "frustrated",
+      "urgency": "high",
+      "purpose": "upcoming trip"
+    },
+    "trends": {
+      "identified_trends": [
+        {
+          "focus_area": "delivery experience",
+          "trend": "Delayed delivery without status updates",
+          "confidence": 0.89
+        },
+        {
+          "focus_area": "customer satisfaction",
+          "trend": "Increasing frustration over time",
+          "confidence": 0.92
+        }
+      ]
+    },
+    "patterns": {
+      "identified_patterns": [
+        {
+          "type": "delivery issues",
+          "description": "Premium product delivery delays",
+          "significance": 0.82
+        },
+        {
+          "type": "communication gaps",
+          "description": "Lack of proactive shipping updates",
+          "significance": 0.78
+        }
+      ]
+    },
+    "findings": {
+      "answers": [
+        {
+          "question": "What is the customer's main concern?",
+          "answer": "The customer's main concern is the lack of updates on their delayed order, especially since they need the item for an upcoming trip.",
+          "confidence": 0.94
+        },
+        {
+          "question": "How urgent is this issue?",
+          "answer": "This issue is highly urgent due to the customer's upcoming trip and the extended period without tracking updates.",
+          "confidence": 0.87
+        }
+      ]
+    }
+  },
+  "meta": {
+    "processing_time": 2.45,
+    "steps_completed": ["attributes", "trends", "patterns", "findings"],
+    "overall_confidence": 0.86,
+    "result_id": "res-78912",
+    "timestamp": "2023-07-15T14:32:18Z"
+  }
 }`
   },
   'analysis-results': {
@@ -112,6 +342,36 @@ const functionMetadata: Record<string, {
     ],
     example: `{
   "workflow_id": "workflow-12345"
+}`,
+    responseExample: `{
+  "results": [
+    {
+      "id": "result-5678",
+      "analysis_type": "trends",
+      "timestamp": "2023-07-15T08:42:56Z",
+      "data": {
+        "trends": [
+          {
+            "focus_area": "customer satisfaction",
+            "trend": "Upward trend in positive feedback"
+          }
+        ]
+      }
+    },
+    {
+      "id": "result-5679",
+      "analysis_type": "patterns",
+      "timestamp": "2023-07-15T09:12:23Z",
+      "data": {
+        "patterns": [
+          {
+            "type": "conversation_flow",
+            "description": "Customers asking about delivery status after ordering"
+          }
+        ]
+      }
+    }
+  ]
 }`
   }
 };
@@ -166,7 +426,8 @@ export default function FunctionSettingsPanel({ selectedFunction, onClose }: Fun
   const metadata = functionMetadata[selectedFunction.id] || {
     inputs: [],
     outputs: [],
-    example: "No example available"
+    example: "No example available",
+    responseExample: "No example response available"
   };
 
   // Render different configuration UI based on function ID
@@ -186,7 +447,7 @@ export default function FunctionSettingsPanel({ selectedFunction, onClose }: Fun
   };
 
   return (
-    <div className="settings-panel bg-background border-l border-border h-full w-96 overflow-y-auto">
+    <div className="settings-panel bg-background border-l border-border h-full w-[512px] overflow-y-auto">
       <Card className="border-0 rounded-none h-full shadow-none">
         <CardHeader className="flex flex-row items-center justify-between p-4 pb-2 border-b">
           <CardTitle className="text-lg font-medium text-emerald-600">{selectedFunction.label}</CardTitle>
@@ -287,11 +548,28 @@ export default function FunctionSettingsPanel({ selectedFunction, onClose }: Fun
               ))}
             </TabsContent>
 
-            <TabsContent value="example" className="px-4 mt-0">
-              <h3 className="text-sm font-medium mb-2">Example Request</h3>
-              <pre className="bg-slate-100 dark:bg-slate-800 p-4 rounded text-sm overflow-x-auto border border-slate-200 dark:border-slate-700 font-mono">
-                {metadata.example}
-              </pre>
+            <TabsContent value="example" className="px-4 mt-0 pb-4">
+              {/* Request Example */}
+              <div className="mb-6">
+                <h3 className="text-sm font-medium mb-2 flex items-center">
+                  <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 mr-2"></span>
+                  Example Request
+                </h3>
+                <pre className="bg-slate-100 dark:bg-slate-800 p-4 rounded text-sm overflow-x-auto border border-slate-200 dark:border-slate-700 font-mono whitespace-pre-wrap">
+                  {metadata.example}
+                </pre>
+              </div>
+              
+              {/* Response Example */}
+              <div>
+                <h3 className="text-sm font-medium mb-2 flex items-center">
+                  <span className="inline-block w-2 h-2 rounded-full bg-blue-500 mr-2"></span>
+                  Example Response
+                </h3>
+                <pre className="bg-slate-100 dark:bg-slate-800 p-4 rounded text-sm overflow-x-auto border border-slate-200 dark:border-slate-700 font-mono whitespace-pre-wrap">
+                  {metadata.responseExample}
+                </pre>
+              </div>
             </TabsContent>
           </Tabs>
         </CardContent>

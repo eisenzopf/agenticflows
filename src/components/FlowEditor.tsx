@@ -113,6 +113,33 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
     fetchFunctions();
   }, []);
 
+  // Handle keyboard events for node deletion
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Delete' && selectedNode) {
+        // Remove the selected node
+        setNodes((nds) => nds.filter((node) => node.id !== selectedNode.id));
+        
+        // Also remove any connected edges
+        setEdges((eds) => eds.filter(
+          (edge) => edge.source !== selectedNode.id && edge.target !== selectedNode.id
+        ));
+        
+        // Clear the selected node
+        setSelectedNode(null);
+        setSelectedFunction(null);
+      }
+    };
+
+    // Add event listener
+    window.addEventListener('keydown', handleKeyDown);
+    
+    // Clean up
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [selectedNode, setNodes, setEdges]);
+
   // Apply horizontal orientation to any nodes
   const ensureHorizontalOrientation = useCallback((nodes: Node[]) => {
     return nodes.map(node => ({
@@ -429,7 +456,7 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
           width: '100%', 
           height: '100%', 
           marginLeft: '64px', 
-          marginRight: selectedFunction ? '380px' : '0', 
+          marginRight: selectedFunction ? '512px' : '0', 
           transition: 'margin-right 0.3s ease-in-out'
         }}
       >
@@ -469,7 +496,7 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
             top: 0, 
             right: 0, 
             height: '100%', 
-            width: '380px',
+            width: '512px',
             zIndex: 10,
             boxShadow: '-2px 0px 10px rgba(0,0,0,0.1)'
           }}
