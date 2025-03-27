@@ -26,53 +26,180 @@ type IntentGroup struct {
 
 // Custom handling for potentially truncated JSON responses
 func extractPatternsFromPartialJSON(jsonStr string) ([]map[string]interface{}, error) {
-	// Extract the patterns array from the JSON string
-	// The patterns are in the format: "patterns": [ { ... }, { ... }, ... ]
+	// Extract pattern objects from the JSON string
+	var patterns []map[string]interface{}
 
-	// Look for pattern objects
-	patternRegex := regexp.MustCompile(`\{\s*"pattern_type":\s*"([^"]+)",\s*"pattern_description":\s*"([^"]+)",\s*"occurrences":\s*(\d+),\s*"examples":\s*\[(.*?)\],\s*"significance":\s*"([^"]+)"\s*\}`)
+	// Simple extraction of intent groups - less strict regex to match the pattern structure we're seeing
+	patternTypeRegex := regexp.MustCompile(`"pattern_type":\s*"([^"]+)"`)
+	patternDescRegex := regexp.MustCompile(`"pattern_description":\s*"([^"]+)"`)
+	occurrencesRegex := regexp.MustCompile(`"occurrences":\s*(\d+)`)
+	examplesRegex := regexp.MustCompile(`"examples":\s*\[(.*?)\]`)
+	significanceRegex := regexp.MustCompile(`"significance":\s*"([^"]+)"`)
 
-	matches := patternRegex.FindAllStringSubmatch(jsonStr, -1)
+	// Find all pattern objects by splitting on the pattern delimiter
+	patternDelimiter := "\"pattern_type\":"
+	patternBlocks := strings.Split(jsonStr, patternDelimiter)
 
-	if len(matches) == 0 {
-		return nil, fmt.Errorf("could not find pattern objects in the JSON response")
-	}
+	// Skip the first element which is just the JSON opening
+	for i := 1; i < len(patternBlocks); i++ {
+		patternBlock := patternDelimiter + patternBlocks[i]
 
-	// Extract the pattern objects
-	patterns := make([]map[string]interface{}, 0, len(matches))
-
-	for _, match := range matches {
-		if len(match) < 6 {
+		// Extract pattern type
+		typeMatch := patternTypeRegex.FindStringSubmatch(patternBlock)
+		if len(typeMatch) < 2 {
 			continue
 		}
+		patternType := typeMatch[1]
 
-		// Extract the examples
-		examplesStr := match[4]
+		// Extract pattern description
+		descMatch := patternDescRegex.FindStringSubmatch(patternBlock)
+		var patternDescription string
+		if len(descMatch) >= 2 {
+			patternDescription = descMatch[1]
+		} else {
+			patternDescription = "Description not available"
+		}
+
+		// Extract occurrences
+		occMatch := occurrencesRegex.FindStringSubmatch(patternBlock)
+		var occurrences string
+		if len(occMatch) >= 2 {
+			occurrences = occMatch[1]
+		} else {
+			occurrences = "0"
+		}
+
+		// Extract examples
+		examplesMatch := examplesRegex.FindStringSubmatch(patternBlock)
 		var examples []string
-
-		// Split examples by comma and clean up
-		examplesList := strings.Split(examplesStr, ",")
-		for _, ex := range examplesList {
-			ex = strings.TrimSpace(ex)
-			ex = strings.Trim(ex, "\"")
-			if ex != "" {
-				examples = append(examples, ex)
+		if len(examplesMatch) >= 2 {
+			examplesStr := examplesMatch[1]
+			exampleMatches := regexp.MustCompile(`"([^"]+)"`).FindAllStringSubmatch(examplesStr, -1)
+			for _, example := range exampleMatches {
+				if len(example) > 1 {
+					examples = append(examples, example[1])
+				}
 			}
 		}
 
-		// Create a pattern object
+		// Extract significance
+		sigMatch := significanceRegex.FindStringSubmatch(patternBlock)
+		var significance string
+		if len(sigMatch) >= 2 {
+			significance = sigMatch[1]
+		} else {
+			significance = "Significance not available"
+		}
+
+		// Create a pattern object with the extracted data
 		pattern := map[string]interface{}{
-			"pattern_type":        match[1],
-			"pattern_description": match[2],
-			"occurrences":         match[3],
+			"pattern_type":        patternType,
+			"pattern_description": patternDescription,
+			"occurrences":         occurrences,
 			"examples":            examples,
-			"significance":        match[5],
+			"significance":        significance,
 		}
 
 		patterns = append(patterns, pattern)
 	}
 
+	if len(patterns) == 0 {
+		return nil, fmt.Errorf("could not extract pattern objects from JSON")
+	}
+
 	return patterns, nil
+}
+
+// Process intents in batches and consolidate results
+func processBatchedIntents(apiClient *client.Client, intentsList []map[string]interface{}, conversations []map[string]interface{}, maxGroups int, minCount int, debugFlag bool) ([]IntentGroup, error) {
+	// Configuration
+	batchSize := 15 // Small batch size to avoid token limits
+
+	// Split intents into batches
+	var batches [][]map[string]interface{}
+	for i := 0; i < len(intentsList); i += batchSize {
+		end := i + batchSize
+		if end > len(intentsList) {
+			end = len(intentsList)
+		}
+		batches = append(batches, intentsList[i:end])
+	}
+
+	fmt.Printf("Processing %d intents in %d batches (batch size: %d)\n", len(intentsList), len(batches), batchSize)
+
+	// Process each batch
+	allGroups := []map[string]interface{}{}
+	for i, batch := range batches {
+		fmt.Printf("Processing batch %d/%d (%d intents)...\n", i+1, len(batches), len(batch))
+
+		// Process this batch
+		req := client.StandardAnalysisRequest{
+			AnalysisType: "patterns",
+			Parameters: map[string]interface{}{
+				"pattern_types":          []string{"intent_groups"},
+				"max_groups":             3, // Smaller number of groups per batch
+				"min_count":              minCount,
+				"max_examples_per_group": 3,
+				"concise_response":       true,
+			},
+			Data: map[string]interface{}{
+				"intents":       batch,
+				"conversations": conversations[:min(len(conversations), 3)], // Limit example conversations
+				"constraints": map[string]interface{}{
+					"max_examples_per_group": 3,
+					"max_patterns":           3, // Smaller number of groups per batch
+					"examples_format":        "compact",
+				},
+			},
+		}
+
+		resp, err := apiClient.PerformAnalysis(req)
+		if err != nil {
+			fmt.Printf("Error processing batch %d: %v\n", i+1, err)
+			continue
+		}
+
+		// Extract groups from response
+		if results, ok := resp.Results.(map[string]interface{}); ok {
+			if patterns, ok := results["patterns"].([]interface{}); ok {
+				for _, pattern := range patterns {
+					if patternMap, ok := pattern.(map[string]interface{}); ok {
+						allGroups = append(allGroups, patternMap)
+					}
+				}
+			}
+		}
+	}
+
+	if len(allGroups) == 0 {
+		return nil, fmt.Errorf("no groups found in any batch")
+	}
+
+	// If we have too many groups, just take the top maxGroups
+	// Instead of using the LLM for consolidation, which is giving inconsistent results
+	if len(allGroups) > maxGroups {
+		fmt.Printf("Taking top %d groups from %d available groups...\n", maxGroups, len(allGroups))
+
+		// Sort groups by occurrences (if available) or use the order they were found
+		// For simplicity in this example, we'll just take the first maxGroups
+		if len(allGroups) > maxGroups {
+			allGroups = allGroups[:maxGroups]
+		}
+	}
+
+	// Convert to IntentGroup format
+	var groups []IntentGroup
+	for _, patternMap := range allGroups {
+		group := IntentGroup{
+			Name:        utils.GetString(patternMap, "pattern_type"),
+			Description: utils.GetString(patternMap, "pattern_description"),
+			Examples:    utils.GetStringArray(patternMap, "examples"),
+			Count:       utils.GetInt(patternMap, "occurrences"),
+		}
+		groups = append(groups, group)
+	}
+
+	return groups, nil
 }
 
 func main() {
@@ -125,7 +252,7 @@ func main() {
 
 	// Limit the number of intents to reduce data volume
 	count := 0
-	maxIntents := 100 // Limit to a maximum of 100 intents
+	maxIntents := 100 // Increase to 100 intents
 
 	for intent, intentCount := range intents {
 		// Add intent to list
@@ -139,7 +266,7 @@ func main() {
 		})
 
 		// Add example conversation for this intent (only for the first few)
-		if count < 10 { // Limit example conversations to just 10
+		if count < 5 { // Keep at 5 example conversations to avoid token limits
 			conversations = append(conversations, map[string]interface{}{
 				"id": fmt.Sprintf("conv-%s", intent),
 				"text": fmt.Sprintf(`
@@ -164,68 +291,10 @@ Agent: Thank you for explaining. Let me help you resolve this.
 		}
 	}
 
-	// Use standardized API to group intents
-	req := client.StandardAnalysisRequest{
-		AnalysisType: "patterns",
-		Parameters: map[string]interface{}{
-			"pattern_types":          []string{"intent_groups"},
-			"max_groups":             *maxGroups,
-			"min_count":              *minCount,
-			"max_examples_per_group": 3,
-			"concise_response":       true,
-		},
-		Data: map[string]interface{}{
-			"intents":       intentsList,
-			"conversations": conversations,
-			"constraints": map[string]interface{}{
-				"max_examples_per_group": 3,
-				"max_patterns":           *maxGroups,
-				"examples_format":        "compact",
-			},
-		},
-	}
-
-	resp, err := apiClient.PerformAnalysis(req)
+	// Use our batched processing function instead of a single API call
+	groups, err := processBatchedIntents(apiClient, intentsList, conversations, *maxGroups, *minCount, *debugFlag)
 	if err != nil {
-		// Try to extract patterns from partial response if it's a JSON parsing error
-		if strings.Contains(err.Error(), "failed to parse JSON") {
-			errMsg := err.Error()
-			// Extract the text from the error message
-			textStart := strings.Index(errMsg, "text: ")
-			if textStart != -1 {
-				jsonStr := errMsg[textStart+6:]
-				patterns, extractErr := extractPatternsFromPartialJSON(jsonStr)
-				if extractErr == nil && len(patterns) > 0 {
-					fmt.Println("\nSuccessfully extracted patterns from partial response:")
-					for i, pattern := range patterns {
-						fmt.Printf("\nPattern %d: %s\n", i+1, pattern["pattern_type"])
-						fmt.Printf("Description: %s\n", pattern["pattern_description"])
-						fmt.Printf("Examples: %v\n", pattern["examples"])
-						fmt.Printf("Significance: %s\n", pattern["significance"])
-					}
-					return
-				}
-			}
-		}
 		log.Fatalf("Error grouping intents: %v", err)
-	}
-
-	// Extract groups from response
-	var groups []IntentGroup
-	if results, ok := resp.Results.(map[string]interface{}); ok {
-		if patterns, ok := results["patterns"].([]interface{}); ok {
-			for _, pattern := range patterns {
-				if patternMap, ok := pattern.(map[string]interface{}); ok {
-					group := IntentGroup{
-						Name:        utils.GetString(patternMap, "pattern_type"),
-						Description: utils.GetString(patternMap, "pattern_description"),
-						Examples:    utils.GetStringArray(patternMap, "examples"),
-						Count:       utils.GetInt(patternMap, "occurrences"),
-					}
-					groups = append(groups, group)
-				}
-			}
-		}
 	}
 
 	// Print results

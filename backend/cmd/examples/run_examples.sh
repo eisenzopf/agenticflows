@@ -125,6 +125,9 @@ run_script() {
             "group_intents")
                 extra_flags="--min-count 5 --max-groups 10"
                 ;;
+            "analyze_fee_disputes")
+                extra_flags="--max $LIMIT --batch 10"
+                ;;
             *)
                 extra_flags="--limit $LIMIT"
                 ;;

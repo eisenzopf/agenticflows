@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"agenticflows/backend/cmd/examples/client"
-	"agenticflows/backend/cmd/examples/utils"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -33,11 +32,13 @@ type TrendAnalysis struct {
 	RecommendedAction string
 }
 
+// Main function
 func main() {
 	// Parse command-line flags
-	dbPath := flag.String("db", "", "Path to the SQLite database")
-	limit := flag.Int("limit", 10, "Number of disputes to analyze")
-	debugFlag := flag.Bool("debug", false, "Enable debug mode")
+	dbPath := flag.String("db", "", "Path to the SQLite database file")
+	maxDisputes := flag.Int("max", 100, "Maximum number of disputes to analyze")
+	batchSize := flag.Int("batch", 10, "Batch size for processing disputes")
+	debug := flag.Bool("debug", false, "Enable debug mode")
 	workflowID := flag.String("workflow", "", "Workflow ID for persisting results")
 	flag.Parse()
 
@@ -48,381 +49,515 @@ func main() {
 		os.Exit(1)
 	}
 
-	startTime := time.Now()
+	// Initialize API client
+	apiClient := client.NewClient("http://localhost:8080", *workflowID, *debug)
 
-	// Create API client using the standardized client package
-	apiClient := client.NewClient("http://localhost:8080", *workflowID, *debugFlag)
-
-	// Print debug information if debug flag is enabled
-	if *debugFlag {
-		fmt.Println("Debug mode enabled: LLM inputs and outputs will be printed")
-	}
-
-	// Step 1: Fetch fee disputes from database
-	fmt.Printf("Fetching %d fee disputes...\n", *limit)
-	disputes, err := fetchFeeDisputes(*dbPath, *limit, apiClient)
+	// Step 1: Fetch fee disputes
+	fmt.Println("Fetching fee disputes from database...")
+	disputes, err := fetchDisputes(*dbPath, *maxDisputes, apiClient)
 	if err != nil {
 		fmt.Printf("Error fetching disputes: %v\n", err)
 		os.Exit(1)
 	}
+	fmt.Printf("Found %d fee disputes\n", len(disputes))
 
-	fmt.Printf("Found %d disputes\n", len(disputes))
-
-	// Step 2: Enrich disputes with sentiment analysis
-	fmt.Println("\nAnalyzing sentiment for disputes...")
-	for i, dispute := range disputes {
-		fmt.Printf("Analyzing sentiment for dispute %s...\n", dispute.ID)
-
-		// Use standardized API to analyze sentiment
-		req := client.StandardAnalysisRequest{
-			AnalysisType: "attributes",
-			Text:         dispute.Text,
-			Parameters: map[string]interface{}{
-				"attributes": []map[string]interface{}{
-					{
-						"field_name":  "sentiment",
-						"title":       "Sentiment",
-						"description": "The overall sentiment of the text (positive, negative, neutral)",
-					},
-					{
-						"field_name":  "sentiment_desc",
-						"title":       "Sentiment Description",
-						"description": "A brief explanation of why this sentiment was chosen",
-					},
-				},
-			},
-		}
-
-		resp, err := apiClient.PerformAnalysis(req)
-		if err != nil {
-			fmt.Printf("Error generating attributes: %v\n", err)
-			continue
-		}
-
-		if results, ok := resp.Results.(map[string]interface{}); ok {
-			if attrValues, ok := results["attribute_values"].(map[string]interface{}); ok {
-				disputes[i].Sentiment = utils.GetString(attrValues, "sentiment")
-				disputes[i].SentimentDesc = utils.GetString(attrValues, "sentiment_desc")
-			}
-		}
-	}
-
-	// Step 3: Analyze trends
-	fmt.Println("\nAnalyzing trends in fee disputes...")
-	req := client.StandardAnalysisRequest{
-		AnalysisType: "trends",
-		Parameters: map[string]interface{}{
-			"focus_areas": []string{
-				"fee_types",
-				"resolution_outcomes",
-				"customer_sentiment",
-				"dispute_patterns",
-			},
-		},
-		Data: map[string]interface{}{
-			"disputes": disputes,
-		},
-	}
-
-	resp, err := apiClient.PerformAnalysis(req)
+	// Step 2: Fetch example conversations
+	fmt.Println("Fetching example conversations...")
+	conversations, err := fetchConversations(*dbPath, 5) // Limit to 5 conversations
 	if err != nil {
-		fmt.Printf("Error analyzing trends: %v\n", err)
+		fmt.Printf("Error fetching conversations: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Found %d example conversations\n", len(conversations))
+
+	// Step 3: Prepare structured data for the API
+	disputeData := prepareDisputeData(disputes)
+
+	// Step 4: Analyze trends in batches
+	fmt.Println("\nAnalyzing trends in fee disputes...")
+	trends, err := processBatchedTrends(apiClient, disputeData, conversations, *batchSize)
+	if err != nil {
+		fmt.Printf("Warning: Error analyzing trends: %v\n", err)
+		fmt.Println("Continuing with partial or default trends...")
 	}
 
-	// Extract trends from response
-	var analysis TrendAnalysis
-	if results, ok := resp.Results.(map[string]interface{}); ok {
-		if trends, ok := results["trends"].([]interface{}); ok {
-			for _, trend := range trends {
-				if trendMap, ok := trend.(map[string]interface{}); ok {
-					focusArea := utils.GetString(trendMap, "focus_area")
-					trendDesc := utils.GetString(trendMap, "trend")
-					switch focusArea {
-					case "fee_types":
-						analysis.TrendDescription = trendDesc
-					case "resolution_outcomes":
-						analysis.RecommendedAction = trendDesc
-					case "customer_sentiment":
-						if sentiments, ok := trendMap["supporting_data"].([]interface{}); ok {
-							for _, s := range sentiments {
-								if str, ok := s.(string); ok {
-									analysis.CommonSentiments = append(analysis.CommonSentiments, str)
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-
-	// Step 4: Identify patterns
+	// Step 5: Identify patterns in batches
 	fmt.Println("\nIdentifying patterns in fee disputes...")
-	var patterns []string
-	var findings string
+	patterns, err := processBatchedPatterns(apiClient, disputeData, conversations, *batchSize)
+	if err != nil {
+		fmt.Printf("Warning: Error identifying patterns: %v\n", err)
+		fmt.Println("Continuing with partial or default patterns...")
+	}
 
-	// Convert disputes to format expected by API
-	disputeData := make([]map[string]interface{}, len(disputes))
+	// Step 6: Generate findings and recommendations
+	fmt.Println("\nGenerating findings and recommendations...")
+	findings, recommendations, err := processBatchedFindings(apiClient, disputeData, conversations, trends, patterns, *batchSize)
+	if err != nil {
+		fmt.Printf("Warning: Error generating findings: %v\n", err)
+		fmt.Println("Continuing with partial or default findings...")
+	}
+
+	// Step 7: Print results
+	fmt.Println("\n=== Results ===")
+	fmt.Println("\nTrends:")
+	for _, trend := range trends.TrendDescriptions {
+		fmt.Printf("- %s\n", trend)
+	}
+
+	fmt.Println("\nPatterns:")
+	for _, pattern := range patterns {
+		fmt.Printf("- %s\n", pattern)
+	}
+
+	fmt.Println("\nFindings:")
+	for _, finding := range findings {
+		fmt.Printf("- %s\n", finding)
+	}
+
+	fmt.Println("\nRecommendations:")
+	for _, rec := range recommendations {
+		fmt.Printf("- %s\n", rec)
+	}
+
+	fmt.Println("\nAnalysis complete!")
+}
+
+// prepareDisputeData converts disputes to a structured format for the API
+func prepareDisputeData(disputes []Dispute) []map[string]interface{} {
+	data := make([]map[string]interface{}, len(disputes))
 	for i, dispute := range disputes {
-		disputeData[i] = map[string]interface{}{
+		data[i] = map[string]interface{}{
 			"id":          dispute.ID,
 			"text":        dispute.Text,
 			"amount":      dispute.Amount,
 			"created_at":  dispute.CreatedAt.Format(time.RFC3339),
 			"sentiment":   dispute.Sentiment,
 			"description": dispute.SentimentDesc,
-			"attributes": map[string]interface{}{
-				"dispute_type":             "Service fee",
-				"resolution_offered":       "Yes",
-				"resolution_type":          "Full refund",
-				"resolution_outcome":       "Resolved in customer's favor",
-				"agent_explanation":        "The fee was charged due to account terms but was refunded as a courtesy",
-				"de_escalation_techniques": "Empathy statements, offering solutions",
-				"customer_sentiment_start": "Negative",
-				"customer_sentiment_end":   "Positive",
-				"call_id":                  dispute.ID,
-				"call_duration":            "5 minutes",
-				"agent_id":                 "EMPL_001",
-				"call_timestamp":           dispute.CreatedAt.Format(time.RFC3339),
+		}
+	}
+	return data
+}
+
+// Analysis represents trends analysis results
+type Analysis struct {
+	TrendDescriptions  []string `json:"trend_descriptions"`
+	RecommendedActions []string `json:"recommended_actions"`
+}
+
+// processBatchedTrends processes disputes in batches for trend analysis
+func processBatchedTrends(apiClient *client.Client, disputeData []map[string]interface{}, conversations []map[string]interface{}, batchSize int) (Analysis, error) {
+	// Define default trends in case of failure
+	defaultAnalysis := Analysis{
+		TrendDescriptions:  []string{"No trends identified due to processing error"},
+		RecommendedActions: []string{"Review the raw data manually to identify trends"},
+	}
+
+	// If there are no disputes, return default
+	if len(disputeData) == 0 {
+		return defaultAnalysis, fmt.Errorf("no dispute data to analyze")
+	}
+
+	// Process in smaller batches to avoid token limits
+	batchCount := (len(disputeData) + batchSize - 1) / batchSize
+	fmt.Printf("Processing %d disputes in %d batches for trend analysis\n", len(disputeData), batchCount)
+
+	// Combine results from all batches
+	var allTrends []string
+	var allActions []string
+
+	// Process each batch
+	for i := 0; i < len(disputeData); i += batchSize {
+		end := i + batchSize
+		if end > len(disputeData) {
+			end = len(disputeData)
+		}
+		batch := disputeData[i:end]
+
+		fmt.Printf("Processing trends batch %d/%d (%d disputes)...\n", (i/batchSize)+1, batchCount, len(batch))
+
+		// Create request for this batch
+		req := client.StandardAnalysisRequest{
+			AnalysisType: "trends",
+			Parameters: map[string]interface{}{
+				"focus_areas": []string{
+					"fee_dispute_trends",
+					"customer_impact",
+					"financial_impact",
+				},
+				"concise_response": true,
 			},
+			Data: map[string]interface{}{
+				"disputes":      batch,
+				"conversations": getLimitedConversations(conversations, 2),
+				"attributes": map[string]interface{}{
+					"avg_amount":       calculateAverageAmount(disputeData),
+					"total_disputes":   len(disputeData),
+					"dispute_timespan": "3 months",
+				},
+			},
+		}
+
+		// Make API request
+		resp, err := apiClient.PerformAnalysis(req)
+		if err != nil {
+			fmt.Printf("Error analyzing trends in batch %d: %v\n", (i/batchSize)+1, err)
+			continue
+		}
+
+		// Extract trends from response
+		if results, ok := resp.Results.(map[string]interface{}); ok {
+			// Extract trend descriptions
+			if trendsData, ok := results["trend_descriptions"].([]interface{}); ok {
+				for _, t := range trendsData {
+					if trend, ok := t.(string); ok {
+						allTrends = append(allTrends, trend)
+					}
+				}
+			}
+
+			// Extract recommended actions
+			if actionsData, ok := results["recommended_actions"].([]interface{}); ok {
+				for _, a := range actionsData {
+					if action, ok := a.(string); ok {
+						allActions = append(allActions, action)
+					}
+				}
+			}
 		}
 	}
 
-	req = client.StandardAnalysisRequest{
-		AnalysisType: "patterns",
-		Parameters: map[string]interface{}{
-			"pattern_types": []string{
-				"fee_dispute_patterns",
-				"resolution_patterns",
-				"customer_behavior_patterns",
-			},
-		},
-		Data: map[string]interface{}{
-			"disputes":      disputeData,
-			"conversations": disputeData,
-			"attributes": []map[string]interface{}{
-				{
-					"field_name":  "dispute_type",
-					"title":       "Type of Fee Dispute",
-					"description": "Categorization of the fee dispute (e.g., late fee, overdraft fee, service fee)",
-				},
-				{
-					"field_name":  "resolution_offered",
-					"title":       "Resolution Offered",
-					"description": "Whether a resolution was offered to the customer",
-				},
-				{
-					"field_name":  "resolution_type",
-					"title":       "Type of Resolution",
-					"description": "The type of resolution offered (e.g., full refund, partial refund)",
-				},
-				{
-					"field_name":  "resolution_outcome",
-					"title":       "Resolution Outcome",
-					"description": "The final outcome of the dispute",
-				},
-				{
-					"field_name":  "agent_explanation",
-					"title":       "Agent Explanation",
-					"description": "The agent's explanation for the fee",
-				},
-				{
-					"field_name":  "de_escalation_techniques",
-					"title":       "De-escalation Techniques Used",
-					"description": "Techniques used by the agent to de-escalate the situation",
-				},
-				{
-					"field_name":  "customer_sentiment_start",
-					"title":       "Customer Sentiment (Start)",
-					"description": "Customer's sentiment at the start of the conversation",
-				},
-				{
-					"field_name":  "customer_sentiment_end",
-					"title":       "Customer Sentiment (End)",
-					"description": "Customer's sentiment at the end of the conversation",
-				},
-				{
-					"field_name":  "call_id",
-					"title":       "Call ID",
-					"description": "Unique identifier for the call",
-				},
-				{
-					"field_name":  "call_duration",
-					"title":       "Call Duration",
-					"description": "Length of the call",
-				},
-				{
-					"field_name":  "agent_id",
-					"title":       "Agent ID",
-					"description": "Unique identifier for the agent",
-				},
-				{
-					"field_name":  "call_timestamp",
-					"title":       "Call Timestamp",
-					"description": "When the call occurred",
-				},
-			},
-		},
+	// If we didn't get any trends, return the default
+	if len(allTrends) == 0 {
+		return defaultAnalysis, nil
 	}
 
-	resp, err = apiClient.PerformAnalysis(req)
-	if err != nil {
-		fmt.Printf("Error identifying patterns: %v\n", err)
-		patterns = []string{"No patterns identified due to error"}
-	} else {
+	// Return the combined results
+	return Analysis{
+		TrendDescriptions:  allTrends,
+		RecommendedActions: allActions,
+	}, nil
+}
+
+// processBatchedPatterns processes disputes in batches for pattern analysis
+func processBatchedPatterns(apiClient *client.Client, disputeData []map[string]interface{}, conversations []map[string]interface{}, batchSize int) ([]string, error) {
+	// Define default patterns in case of failure
+	defaultPatterns := []string{"No patterns identified due to processing error"}
+
+	// If there are no disputes, return default
+	if len(disputeData) == 0 {
+		return defaultPatterns, fmt.Errorf("no dispute data to analyze")
+	}
+
+	// Process in smaller batches to avoid token limits
+	batchCount := (len(disputeData) + batchSize - 1) / batchSize
+	fmt.Printf("Processing %d disputes in %d batches for pattern analysis\n", len(disputeData), batchCount)
+
+	// Combine results from all batches
+	var allPatterns []string
+
+	// Process each batch
+	for i := 0; i < len(disputeData); i += batchSize {
+		end := i + batchSize
+		if end > len(disputeData) {
+			end = len(disputeData)
+		}
+		batch := disputeData[i:end]
+
+		fmt.Printf("Processing patterns batch %d/%d (%d disputes)...\n", (i/batchSize)+1, batchCount, len(batch))
+
+		// Create request for this batch
+		req := client.StandardAnalysisRequest{
+			AnalysisType: "patterns",
+			Parameters: map[string]interface{}{
+				"pattern_types": []string{
+					"fee_dispute_patterns",
+					"resolution_patterns",
+					"customer_behavior_patterns",
+				},
+				"concise_response": true,
+			},
+			Data: map[string]interface{}{
+				"disputes":      batch,
+				"conversations": getLimitedConversations(conversations, 2),
+				"attributes": []map[string]interface{}{
+					{
+						"field_name":  "dispute_type",
+						"title":       "Type of Fee Dispute",
+						"description": "Categorization of the fee dispute (e.g., late fee, overdraft fee, service fee)",
+					},
+					{
+						"field_name":  "resolution_offered",
+						"title":       "Resolution Offered",
+						"description": "Whether a resolution was offered to the customer",
+					},
+					{
+						"field_name":  "resolution_type",
+						"title":       "Type of Resolution",
+						"description": "The type of resolution offered (e.g., full refund, partial refund)",
+					},
+					{
+						"field_name":  "resolution_outcome",
+						"title":       "Resolution Outcome",
+						"description": "The final outcome of the dispute",
+					},
+					{
+						"field_name":  "agent_explanation",
+						"title":       "Agent Explanation",
+						"description": "The agent's explanation for the fee",
+					},
+					{
+						"field_name":  "de_escalation_techniques",
+						"title":       "De-escalation Techniques Used",
+						"description": "Techniques used by the agent to de-escalate the situation",
+					},
+					{
+						"field_name":  "customer_sentiment_start",
+						"title":       "Customer Sentiment (Start)",
+						"description": "Customer's sentiment at the start of the conversation",
+					},
+					{
+						"field_name":  "customer_sentiment_end",
+						"title":       "Customer Sentiment (End)",
+						"description": "Customer's sentiment at the end of the conversation",
+					},
+					{
+						"field_name":  "call_id",
+						"title":       "Call ID",
+						"description": "Unique identifier for the call",
+					},
+					{
+						"field_name":  "call_duration",
+						"title":       "Call Duration",
+						"description": "Length of the call",
+					},
+					{
+						"field_name":  "agent_id",
+						"title":       "Agent ID",
+						"description": "Unique identifier for the agent",
+					},
+					{
+						"field_name":  "call_timestamp",
+						"title":       "Call Timestamp",
+						"description": "When the call occurred",
+					},
+				},
+			},
+		}
+
+		// Make API request
+		resp, err := apiClient.PerformAnalysis(req)
+		if err != nil {
+			fmt.Printf("Error identifying patterns in batch %d: %v\n", (i/batchSize)+1, err)
+			continue
+		}
+
 		// Extract patterns from response
-		patterns = []string{}
 		if results, ok := resp.Results.(map[string]interface{}); ok {
 			if patternList, ok := results["patterns"].([]interface{}); ok {
 				for _, pattern := range patternList {
 					if patternMap, ok := pattern.(map[string]interface{}); ok {
 						if desc, ok := patternMap["pattern_description"].(string); ok {
-							patterns = append(patterns, desc)
+							allPatterns = append(allPatterns, desc)
 						}
 					}
 				}
 			}
 		}
-		if len(patterns) == 0 {
-			patterns = []string{"No patterns identified"}
+	}
+
+	// If we didn't get any patterns, return the default
+	if len(allPatterns) == 0 {
+		return defaultPatterns, nil
+	}
+
+	// Return the combined results
+	return allPatterns, nil
+}
+
+// processBatchedFindings processes disputes in batches for findings analysis
+func processBatchedFindings(apiClient *client.Client, disputeData []map[string]interface{}, conversations []map[string]interface{},
+	analysis Analysis, patterns []string, batchSize int) ([]string, []string, error) {
+	// Define default findings in case of failure
+	defaultFindings := []string{"No findings identified due to processing error"}
+	defaultRecommendations := []string{"Review the raw data manually to identify recommendations"}
+
+	// If there are no disputes, return defaults
+	if len(disputeData) == 0 {
+		return defaultFindings, defaultRecommendations, fmt.Errorf("no dispute data to analyze")
+	}
+
+	// Process in smaller batches to avoid token limits
+	batchCount := (len(disputeData) + batchSize - 1) / batchSize
+	fmt.Printf("Processing %d disputes in %d batches for findings analysis\n", len(disputeData), batchCount)
+
+	// Combine results from all batches
+	var allFindings []string
+	var allRecommendations []string
+
+	// Process each batch
+	for i := 0; i < len(disputeData); i += batchSize {
+		end := i + batchSize
+		if end > len(disputeData) {
+			end = len(disputeData)
 		}
-	}
+		batch := disputeData[i:end]
 
-	// Step 5: Generate findings and recommendations
-	fmt.Println("\nGenerating findings and recommendations...")
-	req = client.StandardAnalysisRequest{
-		AnalysisType: "findings",
-		Parameters: map[string]interface{}{
-			"questions": []string{
-				"What are the most common types of fee disputes?",
-				"What is the average resolution time?",
-				"What are the most effective resolution strategies?",
-				"What are the key areas for improvement?",
-			},
-		},
-		Data: map[string]interface{}{
-			"disputes":      disputeData,
-			"conversations": disputeData,
-			"trends":        analysis,
-			"patterns":      patterns,
-			"attributes": []map[string]interface{}{
-				{
-					"field_name":  "dispute_type",
-					"title":       "Type of Fee Dispute",
-					"description": "Categorization of the fee dispute (e.g., late fee, overdraft fee, service fee)",
-				},
-				{
-					"field_name":  "resolution_offered",
-					"title":       "Resolution Offered",
-					"description": "Whether a resolution was offered to the customer",
-				},
-				{
-					"field_name":  "resolution_type",
-					"title":       "Type of Resolution",
-					"description": "The type of resolution offered (e.g., full refund, partial refund)",
-				},
-				{
-					"field_name":  "resolution_outcome",
-					"title":       "Resolution Outcome",
-					"description": "The final outcome of the dispute",
-				},
-				{
-					"field_name":  "agent_explanation",
-					"title":       "Agent Explanation",
-					"description": "The agent's explanation for the fee",
-				},
-				{
-					"field_name":  "de_escalation_techniques",
-					"title":       "De-escalation Techniques Used",
-					"description": "Techniques used by the agent to de-escalate the situation",
-				},
-				{
-					"field_name":  "customer_sentiment_start",
-					"title":       "Customer Sentiment (Start)",
-					"description": "Customer's sentiment at the start of the conversation",
-				},
-				{
-					"field_name":  "customer_sentiment_end",
-					"title":       "Customer Sentiment (End)",
-					"description": "Customer's sentiment at the end of the conversation",
-				},
-				{
-					"field_name":  "call_id",
-					"title":       "Call ID",
-					"description": "Unique identifier for the call",
-				},
-				{
-					"field_name":  "call_duration",
-					"title":       "Call Duration",
-					"description": "Length of the call",
-				},
-				{
-					"field_name":  "agent_id",
-					"title":       "Agent ID",
-					"description": "Unique identifier for the agent",
-				},
-				{
-					"field_name":  "call_timestamp",
-					"title":       "Call Timestamp",
-					"description": "When the call occurred",
-				},
-			},
-		},
-	}
+		fmt.Printf("Processing findings batch %d/%d (%d disputes)...\n", (i/batchSize)+1, batchCount, len(batch))
 
-	resp, err = apiClient.PerformAnalysis(req)
-	if err != nil {
-		fmt.Printf("Error analyzing findings: %v\n", err)
-		findings = "No findings generated due to error"
-	} else {
+		// Create request for this batch
+		req := client.StandardAnalysisRequest{
+			AnalysisType: "findings",
+			Parameters: map[string]interface{}{
+				"questions": []string{
+					"What are the most common types of fee disputes?",
+					"What is the average resolution time?",
+					"What are the most effective resolution strategies?",
+					"What are the key areas for improvement?",
+				},
+				"concise_response": true,
+			},
+			Data: map[string]interface{}{
+				"disputes":      batch,
+				"conversations": getLimitedConversations(conversations, 2),
+				"trends":        analysis,
+				"patterns":      patterns,
+				"attributes": []map[string]interface{}{
+					{
+						"field_name":  "dispute_type",
+						"title":       "Type of Fee Dispute",
+						"description": "Categorization of the fee dispute (e.g., late fee, overdraft fee, service fee)",
+					},
+					{
+						"field_name":  "resolution_offered",
+						"title":       "Resolution Offered",
+						"description": "Whether a resolution was offered to the customer",
+					},
+					{
+						"field_name":  "resolution_type",
+						"title":       "Type of Resolution",
+						"description": "The type of resolution offered (e.g., full refund, partial refund)",
+					},
+					{
+						"field_name":  "resolution_outcome",
+						"title":       "Resolution Outcome",
+						"description": "The final outcome of the dispute",
+					},
+					{
+						"field_name":  "agent_explanation",
+						"title":       "Agent Explanation",
+						"description": "The agent's explanation for the fee",
+					},
+					{
+						"field_name":  "de_escalation_techniques",
+						"title":       "De-escalation Techniques Used",
+						"description": "Techniques used by the agent to de-escalate the situation",
+					},
+					{
+						"field_name":  "customer_sentiment_start",
+						"title":       "Customer Sentiment (Start)",
+						"description": "Customer's sentiment at the start of the conversation",
+					},
+					{
+						"field_name":  "customer_sentiment_end",
+						"title":       "Customer Sentiment (End)",
+						"description": "Customer's sentiment at the end of the conversation",
+					},
+					{
+						"field_name":  "call_id",
+						"title":       "Call ID",
+						"description": "Unique identifier for the call",
+					},
+					{
+						"field_name":  "call_duration",
+						"title":       "Call Duration",
+						"description": "Length of the call",
+					},
+					{
+						"field_name":  "agent_id",
+						"title":       "Agent ID",
+						"description": "Unique identifier for the agent",
+					},
+					{
+						"field_name":  "call_timestamp",
+						"title":       "Call Timestamp",
+						"description": "When the call occurred",
+					},
+				},
+			},
+		}
+
+		// Make API request
+		resp, err := apiClient.PerformAnalysis(req)
+		if err != nil {
+			fmt.Printf("Error generating findings in batch %d: %v\n", (i/batchSize)+1, err)
+			continue
+		}
+
 		// Extract findings from response
-		findings = "No findings available"
 		if results, ok := resp.Results.(map[string]interface{}); ok {
-			if answers, ok := results["answers"].([]interface{}); ok {
-				var findingsText string
-				for _, answer := range answers {
-					if answerMap, ok := answer.(map[string]interface{}); ok {
-						question := utils.GetString(answerMap, "question")
-						answerText := utils.GetString(answerMap, "answer")
-						confidence := utils.GetString(answerMap, "confidence")
-						findingsText += fmt.Sprintf("\nQ: %s\nA: %s\nConfidence: %s\n", question, answerText, confidence)
+			// Extract findings
+			if findingsData, ok := results["findings"].([]interface{}); ok {
+				for _, f := range findingsData {
+					if finding, ok := f.(string); ok {
+						allFindings = append(allFindings, finding)
 					}
 				}
-				if findingsText != "" {
-					findings = findingsText
+			}
+
+			// Extract recommendations
+			if recsData, ok := results["recommendations"].([]interface{}); ok {
+				for _, r := range recsData {
+					if rec, ok := r.(string); ok {
+						allRecommendations = append(allRecommendations, rec)
+					}
 				}
 			}
 		}
 	}
 
-	// Print results
-	fmt.Println("\n=== Analysis Results ===")
-	fmt.Printf("\nTotal Disputes: %d\n", analysis.TotalDisputes)
-	fmt.Printf("Average Amount: $%.2f\n", analysis.AverageAmount)
-
-	fmt.Println("\nCommon Statuses:")
-	for _, status := range analysis.CommonStatuses {
-		fmt.Printf("- %s\n", status)
+	// If we didn't get any findings, return the defaults
+	if len(allFindings) == 0 {
+		return defaultFindings, defaultRecommendations, nil
 	}
 
-	fmt.Println("\nCommon Sentiments:")
-	for _, sentiment := range analysis.CommonSentiments {
-		fmt.Printf("- %s\n", sentiment)
-	}
-
-	fmt.Println("\nIdentified Patterns:")
-	for _, pattern := range patterns {
-		fmt.Printf("- %s\n", pattern)
-	}
-
-	fmt.Println("\nFindings and Recommendations:")
-	fmt.Println(findings)
-
-	utils.PrintTimeTaken(startTime, "Analyze fee disputes")
+	// Return the combined results
+	return allFindings, allRecommendations, nil
 }
 
-// fetchFeeDisputes fetches fee disputes from the database
-func fetchFeeDisputes(dbPath string, limit int, apiClient *client.Client) ([]Dispute, error) {
+// getLimitedConversations returns a limited number of conversations
+func getLimitedConversations(conversations []map[string]interface{}, limit int) []map[string]interface{} {
+	if len(conversations) <= limit {
+		return conversations
+	}
+	return conversations[:limit]
+}
+
+// Helper function to calculate the average amount of disputes
+func calculateAverageAmount(disputes []map[string]interface{}) float64 {
+	total := 0.0
+	count := 0
+	for _, dispute := range disputes {
+		if amt, ok := dispute["amount"].(float64); ok {
+			total += amt
+			count++
+		}
+	}
+	if count == 0 {
+		return 0
+	}
+	return total / float64(count)
+}
+
+// Helper function to find the minimum of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// fetchDisputes fetches fee disputes from the database
+func fetchDisputes(dbPath string, limit int, apiClient *client.Client) ([]Dispute, error) {
 	// Connect to the database
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
@@ -486,12 +621,10 @@ func fetchFeeDisputes(dbPath string, limit int, apiClient *client.Client) ([]Dis
 		resp, err := apiClient.PerformAnalysis(req)
 		if err == nil {
 			if results, ok := resp.Results.(map[string]interface{}); ok {
-				if attrs, ok := results["attributes"].([]interface{}); ok && len(attrs) > 0 {
-					if attr, ok := attrs[0].(map[string]interface{}); ok {
-						if val, ok := attr["value"].(string); ok {
-							// Try to parse the amount from the value
-							fmt.Sscanf(val, "$%f", &dispute.Amount)
-						}
+				if attrValues, ok := results["attribute_values"].(map[string]interface{}); ok {
+					if amountStr, ok := attrValues["amount"].(string); ok {
+						// Try to parse the amount from the value
+						fmt.Sscanf(amountStr, "$%f", &dispute.Amount)
 					}
 				}
 			}
@@ -505,4 +638,58 @@ func fetchFeeDisputes(dbPath string, limit int, apiClient *client.Client) ([]Dis
 	}
 
 	return disputes, nil
+}
+
+// fetchConversations fetches example conversations from the database
+func fetchConversations(dbPath string, limit int) ([]map[string]interface{}, error) {
+	// Connect to the database
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		return nil, fmt.Errorf("error opening database: %w", err)
+	}
+	defer db.Close()
+
+	// Query for representative conversations
+	query := `
+	SELECT 
+		conversation_id,
+		text,
+		COALESCE(date_time, CURRENT_TIMESTAMP) as date_time
+	FROM conversations
+	WHERE text IS NOT NULL 
+	AND LENGTH(text) > 200
+	ORDER BY RANDOM()
+	LIMIT ?
+	`
+
+	rows, err := db.Query(query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("error querying database: %w", err)
+	}
+	defer rows.Close()
+
+	// Format conversations as objects
+	conversations := make([]map[string]interface{}, 0)
+	for rows.Next() {
+		var id, text, createdAtStr string
+		if err := rows.Scan(&id, &text, &createdAtStr); err != nil {
+			return nil, fmt.Errorf("error scanning row: %w", err)
+		}
+
+		// Parse created_at timestamp
+		createdAt, _ := time.Parse("2006-01-02T15:04:05-07:00", createdAtStr)
+
+		conversations = append(conversations, map[string]interface{}{
+			"id":         id,
+			"text":       text,
+			"created_at": createdAt.Format(time.RFC3339),
+			"type":       "customer_service",
+		})
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating rows: %w", err)
+	}
+
+	return conversations, nil
 }
