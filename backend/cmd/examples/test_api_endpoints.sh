@@ -1,5 +1,34 @@
 #!/bin/bash
 
+# =========================================================
+# Discourse AI Analysis API Test Script
+# =========================================================
+# This script tests the Discourse AI Analysis API endpoints.
+# It uses the consolidated /api/analysis endpoint rather than 
+# the legacy separate endpoints. The consolidated endpoint
+# uses a standardized request/response format with:
+#
+# Request:
+# {
+#   "workflow_id": "your-workflow-id",
+#   "text": "conversation text if applicable",
+#   "analysis_type": "trends|patterns|findings|attributes|intent",
+#   "parameters": { ... analysis-specific parameters ... },
+#   "data": { ... input data for analysis ... }
+# }
+#
+# Response:
+# {
+#   "analysis_type": "type of analysis",
+#   "workflow_id": "your-workflow-id",
+#   "timestamp": "timestamp",
+#   "results": { ... analysis-specific results ... },
+#   "confidence": 0.9,
+#   "data_quality": { ... quality assessment ... },
+#   "error": { ... error information if any ... }
+# }
+# =========================================================
+
 # Color definitions
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -84,7 +113,6 @@ run_test() {
     # Make the API request
     local response=$(curl -s -X POST \
         -H "Content-Type: application/json" \
-        -H "X-Workflow-ID: $WORKFLOW_ID" \
         -d "$payload" \
         "${API_HOST}${endpoint}")
     
@@ -98,7 +126,19 @@ run_test() {
         # Check if the response has an error field
         if [[ $(echo "$response" | jq -r 'has("error")') == "true" && $(echo "$response" | jq -r '.error') != "null" ]]; then
             echo -e "${RED}✘ FAILED:${NC} API returned an error"
-            echo -e "${RED}Error:${NC} $(echo "$response" | jq -r '.error')"
+            
+            # Extract error details based on API format
+            local error_code=$(echo "$response" | jq -r '.error.code // "unknown"')
+            local error_message=$(echo "$response" | jq -r '.error.message // "Unknown error"')
+            local error_details=$(echo "$response" | jq -r '.error.details // ""')
+            
+            echo -e "${RED}Error Code:${NC} $error_code"
+            echo -e "${RED}Error Message:${NC} $error_message"
+            
+            if [ "$error_details" != "" ]; then
+                echo -e "${RED}Error Details:${NC} $error_details"
+            fi
+            
             FAIL_COUNT=$((FAIL_COUNT + 1))
         else
             echo -e "${GREEN}✓ PASSED${NC}"
@@ -113,34 +153,34 @@ run_test() {
 
 # Run tests
 run_tests() {
-    # Test 1: Generate intent
-    run_test "/api/analysis/intent" \
-        "{\"text\":\"$CONVERSATION\",\"workflow_id\":\"$WORKFLOW_ID\"}" \
+    # Test 1: Generate intent using the consolidated endpoint
+    run_test "/api/analysis" \
+        "{\"workflow_id\":\"$WORKFLOW_ID\",\"text\":\"$CONVERSATION\",\"analysis_type\":\"intent\",\"parameters\":{}}" \
         "Generate intent from conversation"
     
-    # Test 2: Generate attributes
-    run_test "/api/analysis/attributes" \
-        "{\"text\":\"$CONVERSATION\",\"attributes\":[{\"field_name\":\"customer_satisfaction\",\"description\":\"Customer satisfaction level (1-5)\"},{\"field_name\":\"resolution_type\",\"description\":\"Type of resolution provided\"}],\"workflow_id\":\"$WORKFLOW_ID\"}" \
+    # Test 2: Generate attributes using the consolidated endpoint
+    run_test "/api/analysis" \
+        "{\"workflow_id\":\"$WORKFLOW_ID\",\"text\":\"$CONVERSATION\",\"analysis_type\":\"attributes\",\"parameters\":{\"attributes\":[{\"field_name\":\"customer_satisfaction\",\"description\":\"Customer satisfaction level (1-5)\"},{\"field_name\":\"resolution_type\",\"description\":\"Type of resolution provided\"}]}}" \
         "Generate attributes from conversation"
     
-    # Test 3: Generate required attributes
-    run_test "/api/analysis/attributes" \
-        "{\"text\":\"$CONVERSATION\",\"generate_required\":true,\"questions\":[\"What are the key factors affecting customer satisfaction?\",\"What types of resolutions are most effective?\"],\"workflow_id\":\"$WORKFLOW_ID\"}" \
+    # Test 3: Generate required attributes using the consolidated endpoint
+    run_test "/api/analysis" \
+        "{\"workflow_id\":\"$WORKFLOW_ID\",\"text\":\"$CONVERSATION\",\"analysis_type\":\"attributes\",\"parameters\":{\"generate_required\":true,\"questions\":[\"What are the key factors affecting customer satisfaction?\",\"What types of resolutions are most effective?\"]}}" \
         "Generate required attributes based on questions"
     
-    # Test 4: Analyze trends
-    run_test "/api/analysis/trends" \
-        "{\"focus_areas\":[\"customer_satisfaction\",\"resolution_effectiveness\"],\"attribute_values\":{\"customer_satisfaction\":4,\"resolution_type\":\"refund\"},\"workflow_id\":\"$WORKFLOW_ID\"}" \
+    # Test 4: Analyze trends using the consolidated endpoint
+    run_test "/api/analysis" \
+        "{\"workflow_id\":\"$WORKFLOW_ID\",\"analysis_type\":\"trends\",\"parameters\":{\"focus_areas\":[\"customer_satisfaction\",\"resolution_effectiveness\"]},\"data\":{\"customer_satisfaction\":4,\"resolution_type\":\"refund\"}}" \
         "Analyze trends in conversation data"
     
-    # Test 5: Identify patterns
-    run_test "/api/analysis/patterns" \
-        "{\"pattern_types\":[\"intent_groups\",\"resolution_patterns\"],\"attribute_values\":{\"intents\":[\"billing issue\",\"refund request\",\"subscription inquiry\"],\"max_groups\":5},\"workflow_id\":\"$WORKFLOW_ID\"}" \
+    # Test 5: Identify patterns using the consolidated endpoint
+    run_test "/api/analysis" \
+        "{\"workflow_id\":\"$WORKFLOW_ID\",\"analysis_type\":\"patterns\",\"parameters\":{\"pattern_types\":[\"intent_groups\",\"resolution_patterns\"]},\"data\":{\"intents\":[\"billing issue\",\"refund request\",\"subscription inquiry\"],\"max_groups\":5}}" \
         "Identify patterns in conversation data"
     
-    # Test 6: Analyze findings
-    run_test "/api/analysis/findings" \
-        "{\"questions\":[\"What is the average customer satisfaction?\",\"What are the most common resolution types?\"],\"attribute_values\":{\"customer_satisfaction\":4,\"resolution_type\":\"refund\",\"resolution_time\":\"3 days\"},\"workflow_id\":\"$WORKFLOW_ID\"}" \
+    # Test 6: Analyze findings using the consolidated endpoint
+    run_test "/api/analysis" \
+        "{\"workflow_id\":\"$WORKFLOW_ID\",\"analysis_type\":\"findings\",\"parameters\":{\"questions\":[\"What is the average customer satisfaction?\",\"What are the most common resolution types?\"]},\"data\":{\"customer_satisfaction\":4,\"resolution_type\":\"refund\",\"resolution_time\":\"3 days\"}}" \
         "Analyze findings from patterns and attributes"
     
     # Print summary
