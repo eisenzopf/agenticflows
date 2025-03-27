@@ -17,22 +17,75 @@ type Conversation struct {
 	Text string
 }
 
-// ApiClient represents a client for the analysis API
-type ApiClient struct {
-	baseURL    string
-	httpClient *http.Client
-	workflowID string
-	debug      bool
+// PrintTimeTaken prints the time taken for an operation
+func PrintTimeTaken(startTime time.Time, operation string) {
+	duration := time.Since(startTime)
+	fmt.Printf("\nTime taken for %s: %v\n", operation, duration)
 }
 
-// NewApiClient creates a new API client
-func NewApiClient(workflowID string, debug bool) *ApiClient {
-	return &ApiClient{
-		baseURL:    "http://localhost:8080/api/analysis",
-		httpClient: &http.Client{Timeout: 30 * time.Second},
-		workflowID: workflowID,
-		debug:      debug,
+// PrettyPrint prints a data structure in a readable format
+func PrettyPrint(data interface{}) {
+	fmt.Printf("%+v\n", data)
+}
+
+// GetString safely extracts a string value from a map
+func GetString(m map[string]interface{}, key string) string {
+	if val, ok := m[key].(string); ok {
+		return val
 	}
+	return ""
+}
+
+// GetInt safely extracts an integer value from a map
+func GetInt(m map[string]interface{}, key string) int {
+	switch v := m[key].(type) {
+	case int:
+		return v
+	case float64:
+		return int(v)
+	default:
+		return 0
+	}
+}
+
+// GetFloat64 safely extracts a float64 value from a map
+func GetFloat64(m map[string]interface{}, key string) float64 {
+	switch v := m[key].(type) {
+	case float64:
+		return v
+	case int:
+		return float64(v)
+	default:
+		return 0.0
+	}
+}
+
+// GetStringArray safely extracts a string array from a map
+func GetStringArray(m map[string]interface{}, key string) []string {
+	if val, ok := m[key].([]interface{}); ok {
+		result := make([]string, 0, len(val))
+		for _, v := range val {
+			if s, ok := v.(string); ok {
+				result = append(result, s)
+			}
+		}
+		return result
+	}
+	return nil
+}
+
+// GetMapArray safely extracts an array of maps from a map
+func GetMapArray(m map[string]interface{}, key string) []map[string]interface{} {
+	if val, ok := m[key].([]interface{}); ok {
+		result := make([]map[string]interface{}, 0, len(val))
+		for _, v := range val {
+			if m, ok := v.(map[string]interface{}); ok {
+				result = append(result, m)
+			}
+		}
+		return result
+	}
+	return nil
 }
 
 // GenerateIntent generates the primary intent for a conversation
@@ -42,7 +95,7 @@ func (c *ApiClient) GenerateIntent(text string) (map[string]interface{}, error) 
 		"text":        text,
 		"workflow_id": c.workflowID,
 	}
-	
+
 	// Make API request
 	return c.makeRequest("intent", requestBody)
 }
@@ -55,7 +108,7 @@ func (c *ApiClient) GenerateAttributes(text string, attributes []map[string]stri
 		"attributes":  attributes,
 		"workflow_id": c.workflowID,
 	}
-	
+
 	// Make API request
 	return c.makeRequest("attributes", requestBody)
 }
@@ -64,15 +117,15 @@ func (c *ApiClient) GenerateAttributes(text string, attributes []map[string]stri
 func (c *ApiClient) GenerateRequiredAttributes(questions []string, targetIntent string) (map[string]interface{}, error) {
 	// Prepare request body
 	requestBody := map[string]interface{}{
-		"questions":        questions,
-		"workflow_id":      c.workflowID,
+		"questions":         questions,
+		"workflow_id":       c.workflowID,
 		"generate_required": true,
 	}
-	
+
 	if targetIntent != "" {
 		requestBody["intent"] = targetIntent
 	}
-	
+
 	// Make API request
 	return c.makeRequest("attributes", requestBody)
 }
@@ -147,7 +200,7 @@ func generateFeeDisputeAttributes() []map[string]interface{} {
 			"type":        "boolean",
 		},
 	}
-	
+
 	// Convert to expected return format
 	result := make([]map[string]interface{}, 0, len(defaultAttributes))
 	for _, attr := range defaultAttributes {
@@ -157,7 +210,7 @@ func generateFeeDisputeAttributes() []map[string]interface{} {
 		}
 		result = append(result, resultAttr)
 	}
-	
+
 	return result
 }
 
@@ -168,13 +221,13 @@ func (c *ApiClient) AnalyzeTrends(data []map[string]interface{}) (map[string]int
 		"data":        data,
 		"workflow_id": c.workflowID,
 	}
-	
+
 	// Try to make API request
 	resp, err := c.makeRequest("trends", requestBody)
 	if err != nil {
 		if strings.Contains(err.Error(), "404") {
 			fmt.Println("API call failed:", err, ", implementing client-side trend analysis")
-			
+
 			// Create a fallback response with simple trend data
 			fallbackResponse := map[string]interface{}{
 				"trends": []map[string]interface{}{
@@ -188,15 +241,15 @@ func (c *ApiClient) AnalyzeTrends(data []map[string]interface{}) (map[string]int
 					},
 				},
 			}
-			
+
 			// Debug log for fallback
 			c.printDebug("trends (fallback)", requestBody, fallbackResponse, nil)
-			
+
 			return fallbackResponse, nil
 		}
 		return nil, err
 	}
-	
+
 	return resp, nil
 }
 
@@ -210,20 +263,20 @@ func (c *ApiClient) IdentifyPatterns(data []map[string]interface{}, patternTypes
 		"pattern_types": patternTypes,
 		"workflow_id":   c.workflowID,
 	}
-	
+
 	// Debug log before making request
 	if c.debug {
 		fmt.Println("Making IdentifyPatterns request to patterns endpoint with:")
 		jsonData, _ := json.MarshalIndent(requestBody, "", "  ")
 		fmt.Println(string(jsonData))
 	}
-	
+
 	// Make API request
 	resp, err := c.makeRequest("patterns", requestBody)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return resp, nil
 }
 
@@ -234,20 +287,20 @@ func (c *ApiClient) AnalyzeFindings(data map[string]interface{}) (map[string]int
 		"data":        data,
 		"workflow_id": c.workflowID,
 	}
-	
+
 	// Debug log before making request
 	if c.debug {
 		fmt.Println("Making AnalyzeFindings request to findings endpoint with:")
 		jsonData, _ := json.MarshalIndent(requestBody, "", "  ")
 		fmt.Println(string(jsonData))
 	}
-	
+
 	// Make API request
 	resp, err := c.makeRequest("findings", requestBody)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return resp, nil
 }
 
@@ -255,7 +308,7 @@ func (c *ApiClient) AnalyzeFindings(data map[string]interface{}) (map[string]int
 func (c *ApiClient) GroupIntents(intents []map[string]interface{}, maxGroups int) (map[string]interface{}, error) {
 	// Define batch size - limit to 10 intents per request to avoid server overload
 	batchSize := 10
-	
+
 	// Normalize counts to avoid outliers overwhelming the model
 	normalizedIntents := make([]map[string]interface{}, 0, len(intents))
 	for _, intent := range intents {
@@ -272,7 +325,7 @@ func (c *ApiClient) GroupIntents(intents []map[string]interface{}, maxGroups int
 				if count > 100 {
 					normalizedIntent[k] = 100
 					if c.debug {
-						fmt.Printf("Normalized count for intent '%v' from %d to 100\n", 
+						fmt.Printf("Normalized count for intent '%v' from %d to 100\n",
 							intent["intent"], count)
 					}
 				} else {
@@ -284,40 +337,40 @@ func (c *ApiClient) GroupIntents(intents []map[string]interface{}, maxGroups int
 		}
 		normalizedIntents = append(normalizedIntents, normalizedIntent)
 	}
-	
+
 	// If intents list is small enough, send in a single request
 	if len(normalizedIntents) <= batchSize {
 		return c.processIntentBatch(normalizedIntents, maxGroups)
 	}
-	
+
 	// Process in batches
 	if c.debug {
 		fmt.Printf("Splitting %d intents into batches of %d\n", len(normalizedIntents), batchSize)
 	}
-	
+
 	var allGroups []map[string]interface{}
 	var allPatterns []interface{}
 	batchCount := (len(normalizedIntents) + batchSize - 1) / batchSize
-	
+
 	// Process intents in batches
 	for i := 0; i < len(normalizedIntents); i += batchSize {
 		end := i + batchSize
 		if end > len(normalizedIntents) {
 			end = len(normalizedIntents)
 		}
-		
+
 		batch := normalizedIntents[i:end]
 		batchNum := (i / batchSize) + 1
-		
+
 		if c.debug {
 			fmt.Printf("Processing batch %d/%d with %d intents\n", batchNum, batchCount, len(batch))
 		}
-		
+
 		// Process this batch with retry logic
 		maxRetries := 2
 		var batchResult map[string]interface{}
 		var err error
-		
+
 		for retry := 0; retry <= maxRetries; retry++ {
 			// If this is a retry, wait a bit before trying again
 			if retry > 0 {
@@ -326,13 +379,13 @@ func (c *ApiClient) GroupIntents(intents []map[string]interface{}, maxGroups int
 				}
 				time.Sleep(time.Duration(retry) * 500 * time.Millisecond) // Exponential backoff
 			}
-			
+
 			// Try to process the batch
 			batchResult, err = c.processIntentBatch(batch, maxGroups)
 			if err == nil {
 				break // Successful, exit retry loop
 			}
-			
+
 			// If we've exhausted retries, log the error
 			if retry == maxRetries {
 				if c.debug {
@@ -340,12 +393,12 @@ func (c *ApiClient) GroupIntents(intents []map[string]interface{}, maxGroups int
 				}
 			}
 		}
-		
+
 		// If we still have an error after retries, continue with partial results
 		if err != nil {
 			continue
 		}
-		
+
 		// Extract groups from the batch result
 		if groups, ok := batchResult["groups"].([]map[string]interface{}); ok {
 			if c.debug {
@@ -353,24 +406,24 @@ func (c *ApiClient) GroupIntents(intents []map[string]interface{}, maxGroups int
 			}
 			allGroups = append(allGroups, groups...)
 		}
-		
+
 		// Extract patterns for future processing
 		if patterns, ok := batchResult["patterns"].([]interface{}); ok {
 			allPatterns = append(allPatterns, patterns...)
 		}
 	}
-	
+
 	// If we didn't get any groups, return an error
 	if len(allGroups) == 0 {
 		return nil, fmt.Errorf("failed to process all batches, no groups were returned")
 	}
-	
+
 	// Combine the results
 	if c.debug {
-		fmt.Printf("Combining results from %d batches. Total of %d groups found.\n", 
+		fmt.Printf("Combining results from %d batches. Total of %d groups found.\n",
 			batchCount, len(allGroups))
 	}
-	
+
 	// Deduplicate groups if needed
 	// This is simplified deduplication - in a real system you might want more sophisticated logic
 	groupMap := make(map[string]map[string]interface{})
@@ -382,19 +435,19 @@ func (c *ApiClient) GroupIntents(intents []map[string]interface{}, maxGroups int
 			}
 		}
 	}
-	
+
 	// Convert back to slice
 	uniqueGroups := make([]map[string]interface{}, 0, len(groupMap))
 	for _, group := range groupMap {
 		uniqueGroups = append(uniqueGroups, group)
 	}
-	
+
 	if c.debug {
 		fmt.Printf("After deduplication: %d unique groups\n", len(uniqueGroups))
 	}
-	
+
 	return map[string]interface{}{
-		"groups": uniqueGroups,
+		"groups":   uniqueGroups,
 		"patterns": allPatterns,
 	}, nil
 }
@@ -404,42 +457,42 @@ func (c *ApiClient) processIntentBatch(intents []map[string]interface{}, maxGrou
 	// Prepare request body - use the correct format expected by the API
 	requestBody := map[string]interface{}{
 		"attribute_values": map[string]interface{}{
-			"intents": intents,
+			"intents":    intents,
 			"max_groups": maxGroups, // Put max_groups inside attribute_values instead
 		},
 		"pattern_types": []string{"intent_groups"},
 		"workflow_id":   c.workflowID,
 	}
-	
+
 	// Debug log before making request
 	if c.debug {
 		fmt.Println("Making GroupIntents request to patterns endpoint with:")
 		jsonData, _ := json.MarshalIndent(requestBody, "", "  ")
 		fmt.Println(string(jsonData))
 	}
-	
+
 	// Make API request
 	resp, err := c.makeRequest("patterns", requestBody)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Extract results from response
 	resultsData, ok := resp["results"].(map[string]interface{})
 	if !ok {
 		return nil, fmt.Errorf("unexpected response format: missing 'results' field")
 	}
-	
+
 	// Transform the patterns response into the expected groups format
 	if patterns, ok := resultsData["patterns"].([]interface{}); ok {
 		groups := make([]map[string]interface{}, 0)
-		
+
 		for _, pattern := range patterns {
 			if patternMap, ok := pattern.(map[string]interface{}); ok {
 				// Extract pattern info
 				description := getString(patternMap, "pattern_description")
 				examples := getStringArray(patternMap, "examples")
-				
+
 				// Create a group
 				group := map[string]interface{}{
 					"name":        getString(patternMap, "pattern_type"),
@@ -447,51 +500,19 @@ func (c *ApiClient) processIntentBatch(intents []map[string]interface{}, maxGrou
 					"examples":    examples,
 					"count":       getInt(patternMap, "occurrences"),
 				}
-				
+
 				groups = append(groups, group)
 			}
 		}
-		
+
 		// Return in the expected format
 		return map[string]interface{}{
-			"groups": groups,
+			"groups":   groups,
 			"patterns": patterns,
 		}, nil
 	}
-	
+
 	return resp, nil
-}
-
-// Helper functions for safe type conversion
-func getString(m map[string]interface{}, key string) string {
-	if val, ok := m[key].(string); ok {
-		return val
-	}
-	return ""
-}
-
-func getInt(m map[string]interface{}, key string) int {
-	switch v := m[key].(type) {
-	case int:
-		return v
-	case float64:
-		return int(v)
-	default:
-		return 0
-	}
-}
-
-func getStringArray(m map[string]interface{}, key string) []string {
-	if val, ok := m[key].([]interface{}); ok {
-		result := make([]string, 0, len(val))
-		for _, item := range val {
-			if str, ok := item.(string); ok {
-				result = append(result, str)
-			}
-		}
-		return result
-	}
-	return []string{}
 }
 
 // DescribeGroup generates a description for an intent group
@@ -505,20 +526,20 @@ func (c *ApiClient) DescribeGroup(groupName string, examples []string) (map[stri
 		"pattern_types": []string{"group_description"},
 		"workflow_id":   c.workflowID,
 	}
-	
+
 	// Debug log before making request
 	if c.debug {
 		fmt.Println("Making DescribeGroup request to patterns endpoint with:")
 		jsonData, _ := json.MarshalIndent(requestBody, "", "  ")
 		fmt.Println(string(jsonData))
 	}
-	
+
 	// Make API request
 	resp, err := c.makeRequest("patterns", requestBody)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Extract the description from the patterns response
 	if patterns, ok := resp["patterns"].([]interface{}); ok && len(patterns) > 0 {
 		if pattern, ok := patterns[0].(map[string]interface{}); ok {
@@ -530,7 +551,7 @@ func (c *ApiClient) DescribeGroup(groupName string, examples []string) (map[stri
 			}
 		}
 	}
-	
+
 	// If we couldn't extract a description from the response
 	return map[string]interface{}{
 		"description": "No description available from API response.",
@@ -545,42 +566,42 @@ func (c *ApiClient) IdentifyAttributes(questions []string, text string) (map[str
 		"text":        text,
 		"workflow_id": c.workflowID,
 	}
-	
+
 	// Debug log before making request
 	if c.debug {
 		fmt.Println("Making IdentifyAttributes request to intent endpoint with:")
 		jsonData, _ := json.MarshalIndent(requestBody, "", "  ")
 		fmt.Println(string(jsonData))
 	}
-	
+
 	// Make API request
 	resp, err := c.makeRequest("intent", requestBody)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return resp, nil
 }
 
 // makeRequest makes an API request to the specified endpoint
 func (c *ApiClient) makeRequest(endpoint string, requestBody map[string]interface{}) (map[string]interface{}, error) {
 	url := fmt.Sprintf("%s/%s", c.baseURL, endpoint)
-	
+
 	// Marshal request body to JSON
 	jsonBody, err := json.Marshal(requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling request body: %w", err)
 	}
-	
+
 	// Create request
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("error creating request: %w", err)
 	}
-	
+
 	// Set headers
 	req.Header.Set("Content-Type", "application/json")
-	
+
 	// Make request
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -588,14 +609,14 @@ func (c *ApiClient) makeRequest(endpoint string, requestBody map[string]interfac
 		return nil, fmt.Errorf("error making request: %w", err)
 	}
 	defer resp.Body.Close()
-	
+
 	// Read response body
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		c.printDebug(endpoint, requestBody, nil, err)
 		return nil, fmt.Errorf("error reading response body: %w", err)
 	}
-	
+
 	// Check response status
 	if resp.StatusCode != http.StatusOK {
 		// Try to extract detailed error message if possible
@@ -607,40 +628,24 @@ func (c *ApiClient) makeRequest(endpoint string, requestBody map[string]interfac
 				return nil, err
 			}
 		}
-		
+
 		// Fall back to generic error with response body
 		err := fmt.Errorf("API returned non-OK status: %d, body: %s", resp.StatusCode, string(respBody))
 		c.printDebug(endpoint, requestBody, nil, err)
 		return nil, err
 	}
-	
+
 	// Unmarshal response body
 	var result map[string]interface{}
 	if err := json.Unmarshal(respBody, &result); err != nil {
 		c.printDebug(endpoint, requestBody, nil, err)
 		return nil, fmt.Errorf("error unmarshaling response body: %w", err)
 	}
-	
+
 	// Debug log
 	c.printDebug(endpoint, requestBody, result, nil)
-	
+
 	return result, nil
-}
-
-// PrintTimeTaken prints the time taken to execute a task
-func PrintTimeTaken(startTime time.Time, taskName string) {
-	elapsed := time.Since(startTime)
-	fmt.Printf("\n%s completed in %s\n", taskName, elapsed)
-}
-
-// PrettyPrint prints a map as formatted JSON
-func PrettyPrint(data interface{}) {
-	jsonData, err := json.MarshalIndent(data, "", "  ")
-	if err != nil {
-		fmt.Printf("Error formatting JSON: %v\n", err)
-		return
-	}
-	fmt.Println(string(jsonData))
 }
 
 // GetEnvOrDefault gets an environment variable or returns a default value
@@ -657,14 +662,14 @@ func (c *ApiClient) printDebug(action string, request interface{}, response inte
 	if !c.debug {
 		return
 	}
-	
+
 	fmt.Println("\n==== LLM DEBUG ====")
 	fmt.Printf("Action: %s\n", action)
-	
+
 	fmt.Println("\n--- Request ---")
 	requestJSON, _ := json.MarshalIndent(request, "", "  ")
 	fmt.Println(string(requestJSON))
-	
+
 	if err != nil {
 		fmt.Println("\n--- Error ---")
 		fmt.Printf("Error: %v\n", err)
@@ -673,6 +678,6 @@ func (c *ApiClient) printDebug(action string, request interface{}, response inte
 		responseJSON, _ := json.MarshalIndent(response, "", "  ")
 		fmt.Println(string(responseJSON))
 	}
-	
+
 	fmt.Println("==================\n")
-} 
+}

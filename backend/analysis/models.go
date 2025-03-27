@@ -12,12 +12,52 @@ type AnalysisRequest struct {
 	BatchSize       *int                   `json:"batch_size,omitempty"`
 }
 
+// StandardAnalysisRequest represents a unified request structure for all analysis endpoints
+type StandardAnalysisRequest struct {
+	// Common fields
+	WorkflowID string `json:"workflow_id,omitempty"`
+	Text       string `json:"text,omitempty"`
+	
+	// Analysis-specific fields
+	AnalysisType string                 `json:"analysis_type"` // "trends", "patterns", "findings", "attributes", "intent"
+	Parameters   map[string]interface{} `json:"parameters"`    // Analysis-specific parameters
+	Data         map[string]interface{} `json:"data,omitempty"` // Input data for analysis
+}
+
 // AnalysisResponse represents a generic response from analysis methods
 type AnalysisResponse struct {
 	Results     interface{} `json:"results"`
 	Confidence  float64     `json:"confidence,omitempty"`
 	Explanation string      `json:"explanation,omitempty"`
 	DataGaps    []string    `json:"data_gaps,omitempty"`
+}
+
+// StandardAnalysisResponse represents a unified response structure
+type StandardAnalysisResponse struct {
+	// Common fields
+	AnalysisType string    `json:"analysis_type"`
+	WorkflowID   string    `json:"workflow_id,omitempty"`
+	Timestamp    time.Time `json:"timestamp"`
+	
+	// Results
+	Results     interface{} `json:"results"`
+	Confidence  float64     `json:"confidence,omitempty"`
+	
+	// Metadata
+	DataQuality struct {
+		Assessment  string   `json:"assessment,omitempty"`
+		Limitations []string `json:"limitations,omitempty"`
+	} `json:"data_quality,omitempty"`
+	
+	// Error handling
+	Error *AnalysisError `json:"error,omitempty"`
+}
+
+// AnalysisError represents error information
+type AnalysisError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Details string `json:"details,omitempty"`
 }
 
 // AttributeDefinition represents a required data attribute

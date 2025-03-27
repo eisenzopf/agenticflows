@@ -1,0 +1,243 @@
+package client
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"time"
+)
+
+// StandardAnalysisRequest represents a request to the standardized analysis API
+type StandardAnalysisRequest struct {
+	// Common fields
+	WorkflowID string `json:"workflow_id,omitempty"`
+	Text       string `json:"text,omitempty"`
+
+	// Analysis-specific fields
+	AnalysisType string                 `json:"analysis_type"`  // "trends", "patterns", "findings", "attributes", "intent"
+	Parameters   map[string]interface{} `json:"parameters"`     // Analysis-specific parameters
+	Data         map[string]interface{} `json:"data,omitempty"` // Input data for analysis
+}
+
+// StandardAnalysisResponse represents a response from the standardized analysis API
+type StandardAnalysisResponse struct {
+	AnalysisType string      `json:"analysis_type"`
+	Results      interface{} `json:"results"`
+	Confidence   float64     `json:"confidence,omitempty"`
+	Error        string      `json:"error,omitempty"`
+}
+
+// Client represents a client for the standardized analysis API
+type Client struct {
+	baseURL    string
+	httpClient *http.Client
+	workflowID string
+	debug      bool
+}
+
+// NewClient creates a new standardized API client
+func NewClient(baseURL string, workflowID string, debug bool) *Client {
+	return &Client{
+		baseURL:    baseURL,
+		httpClient: &http.Client{Timeout: 120 * time.Second},
+		workflowID: workflowID,
+		debug:      debug,
+	}
+}
+
+// PerformAnalysis performs an analysis using the standardized API
+func (c *Client) PerformAnalysis(req StandardAnalysisRequest) (*StandardAnalysisResponse, error) {
+	// Add workflow ID to request if provided
+	requestData := map[string]interface{}{
+		"workflow_id":   c.workflowID,
+		"analysis_type": req.AnalysisType,
+		"parameters":    req.Parameters,
+	}
+
+	if req.Text != "" {
+		requestData["text"] = req.Text
+	}
+
+	// Include Data field if provided
+	if req.Data != nil && len(req.Data) > 0 {
+		requestData["data"] = req.Data
+	}
+
+	// Convert request to JSON
+	reqBody, err := json.Marshal(requestData)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling request: %w", err)
+	}
+
+	// Debug output
+	if c.debug {
+		fmt.Printf("API Request to /api/analysis:\n%s\n", string(reqBody))
+	}
+
+	// Create HTTP request
+	httpReq, err := http.NewRequest("POST", fmt.Sprintf("%s/api/analysis", c.baseURL), bytes.NewBuffer(reqBody))
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	// Send request
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("error making request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response body
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("error reading response: %w", err)
+	}
+
+	// Debug output
+	if c.debug {
+		fmt.Printf("API Response from /api/analysis:\n%s\n", string(respBody))
+	}
+
+	// Check response status
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API error: %s, body: %s", resp.Status, string(respBody))
+	}
+
+	// Parse response
+	var result StandardAnalysisResponse
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("error parsing response: %w", err)
+	}
+
+	// Check for API-level errors
+	if result.Error != "" {
+		return nil, fmt.Errorf("API returned error: %s", result.Error)
+	}
+
+	return &result, nil
+}
+
+// GenerateIntent generates intent for the given text
+func (c *Client) GenerateIntent(text string) (map[string]interface{}, error) {
+	req := StandardAnalysisRequest{
+		AnalysisType: "intent",
+		Text:         text,
+		Parameters:   map[string]interface{}{},
+	}
+
+	resp, err := c.PerformAnalysis(req)
+	if err != nil {
+		return nil, err
+	}
+
+	if results, ok := resp.Results.(map[string]interface{}); ok {
+		return results, nil
+	}
+
+	return nil, fmt.Errorf("unexpected response format")
+}
+
+// GenerateAttributes generates attribute values for the given text
+func (c *Client) GenerateAttributes(text string, attributes []map[string]string) (map[string]interface{}, error) {
+	req := StandardAnalysisRequest{
+		AnalysisType: "attributes",
+		Text:         text,
+		Parameters: map[string]interface{}{
+			"attributes": attributes,
+		},
+	}
+
+	resp, err := c.PerformAnalysis(req)
+	if err != nil {
+		return nil, err
+	}
+
+	if results, ok := resp.Results.(map[string]interface{}); ok {
+		return results, nil
+	}
+
+	return nil, fmt.Errorf("unexpected response format")
+}
+
+// AnalyzeTrends analyzes trends in the provided data
+func (c *Client) AnalyzeTrends(data []map[string]interface{}) (map[string]interface{}, error) {
+	req := StandardAnalysisRequest{
+		AnalysisType: "trends",
+		Parameters: map[string]interface{}{
+			"focus_areas": []string{
+				"disputed_charges",
+				"resolution_effectiveness",
+				"customer_satisfaction",
+				"dispute_reasons",
+			},
+		},
+		Data: map[string]interface{}{
+			"attribute_values": data,
+		},
+	}
+
+	resp, err := c.PerformAnalysis(req)
+	if err != nil {
+		return nil, err
+	}
+
+	if results, ok := resp.Results.(map[string]interface{}); ok {
+		return results, nil
+	}
+
+	return nil, fmt.Errorf("unexpected response format")
+}
+
+// IdentifyPatterns identifies patterns in the provided data
+func (c *Client) IdentifyPatterns(data []map[string]interface{}, patternTypes []string) (map[string]interface{}, error) {
+	req := StandardAnalysisRequest{
+		AnalysisType: "patterns",
+		Parameters: map[string]interface{}{
+			"pattern_types": patternTypes,
+		},
+		Data: map[string]interface{}{
+			"attribute_values": data,
+		},
+	}
+
+	resp, err := c.PerformAnalysis(req)
+	if err != nil {
+		return nil, err
+	}
+
+	if results, ok := resp.Results.(map[string]interface{}); ok {
+		return results, nil
+	}
+
+	return nil, fmt.Errorf("unexpected response format")
+}
+
+// AnalyzeFindings analyzes findings from the provided data
+func (c *Client) AnalyzeFindings(data map[string]interface{}) (map[string]interface{}, error) {
+	req := StandardAnalysisRequest{
+		AnalysisType: "findings",
+		Parameters: map[string]interface{}{
+			"questions": []string{
+				"What are the most common types of fee disputes?",
+				"How effective are the current resolution approaches?",
+				"What patterns exist in customer sentiment regarding fee disputes?",
+				"What are the key opportunities for improving fee dispute handling?",
+			},
+		},
+		Data: data,
+	}
+
+	resp, err := c.PerformAnalysis(req)
+	if err != nil {
+		return nil, err
+	}
+
+	if results, ok := resp.Results.(map[string]interface{}); ok {
+		return results, nil
+	}
+
+	return nil, fmt.Errorf("unexpected response format")
+}

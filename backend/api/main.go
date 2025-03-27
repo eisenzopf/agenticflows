@@ -44,13 +44,17 @@ func main() {
 
 	// Analysis routes (if initialized)
 	if analysisHandler != nil {
-		http.HandleFunc("/api/analysis/trends", analysisHandler.handleAnalysisTrends)
+		// New unified endpoint
+		http.HandleFunc("/api/analysis", analysisHandler.handleAnalysis)
+
+		// Legacy endpoints (kept for backward compatibility)
+		/*http.HandleFunc("/api/analysis/trends", analysisHandler.handleAnalysisTrends)
 		http.HandleFunc("/api/analysis/patterns", analysisHandler.handleAnalysisPatterns)
 		http.HandleFunc("/api/analysis/findings", analysisHandler.handleAnalysisFindings)
 		http.HandleFunc("/api/analysis/attributes", analysisHandler.handleTextAttributes)
 		http.HandleFunc("/api/analysis/intent", analysisHandler.handleTextIntent)
 		http.HandleFunc("/api/analysis/results", analysisHandler.handleAnalysisResults)
-		http.HandleFunc("/api/analysis/results/", analysisHandler.handleAnalysisResults)
+		http.HandleFunc("/api/analysis/results/", analysisHandler.handleAnalysisResults)*/
 	}
 
 	// CORS middleware for development
@@ -278,4 +282,4 @@ func handleWorkflow(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
-} 
+}

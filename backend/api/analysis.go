@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"agenticflows/backend/analysis"
 	"agenticflows/backend/db"
@@ -394,4 +396,375 @@ func (h *AnalysisHandler) handleAnalysisResults(w http.ResponseWriter, r *http.R
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// handleAnalysis handles the unified /api/analysis endpoint
+func (h *AnalysisHandler) handleAnalysis(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse standard request
+	var req analysis.StandardAnalysisRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendAnalysisError(w, "invalid_request", fmt.Sprintf("Invalid request format: %s", err), http.StatusBadRequest)
+		return
+	}
+
+	// Route to appropriate analysis function based on type
+	var resp *analysis.StandardAnalysisResponse
+	var err error
+	
+	switch req.AnalysisType {
+	case "trends":
+		resp, err = h.handleTrendsAnalysis(r.Context(), req)
+	case "patterns":
+		resp, err = h.handlePatternsAnalysis(r.Context(), req)
+	case "findings":
+		resp, err = h.handleFindingsAnalysis(r.Context(), req)
+	case "attributes":
+		resp, err = h.handleAttributesAnalysis(r.Context(), req)
+	case "intent":
+		resp, err = h.handleIntentAnalysis(r.Context(), req)
+	default:
+		sendAnalysisError(w, "invalid_analysis_type", "Invalid analysis type", http.StatusBadRequest)
+		return
+	}
+
+	if err != nil {
+		log.Printf("Error processing %s analysis: %v", req.AnalysisType, err)
+		sendAnalysisError(w, "analysis_error", err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Save result to database if workflow ID is provided
+	if req.WorkflowID != "" && resp != nil && resp.Error == nil {
+		resultID := uuid.New().String()
+		resultsJSON, err := json.Marshal(resp.Results)
+		if err != nil {
+			log.Printf("Error marshaling results for storage: %v", err)
+		} else {
+			if err := db.SaveAnalysisResult(resultID, req.WorkflowID, req.AnalysisType, string(resultsJSON)); err != nil {
+				log.Printf("Error saving analysis result: %v", err)
+			}
+		}
+	}
+
+	// Return standard response
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Printf("Error encoding response: %v", err)
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+	}
+}
+
+// Helper function to send standardized error responses
+func sendAnalysisError(w http.ResponseWriter, code string, message string, statusCode int) {
+	resp := analysis.StandardAnalysisResponse{
+		Timestamp: time.Now(),
+		Error: &analysis.AnalysisError{
+			Code:    code,
+			Message: message,
+		},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Printf("Error encoding error response: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+	}
+}
+
+// handleTrendsAnalysis processes a trends analysis request
+func (h *AnalysisHandler) handleTrendsAnalysis(ctx context.Context, req analysis.StandardAnalysisRequest) (*analysis.StandardAnalysisResponse, error) {
+	// Extract parameters
+	focusAreas, err := extractStringSlice(req.Parameters, "focus_areas")
+	if err != nil {
+		return nil, fmt.Errorf("invalid focus_areas parameter: %w", err)
+	}
+
+	// Convert to legacy request format
+	legacyReq := analysis.AnalysisRequest{
+		FocusAreas:      focusAreas,
+		AttributeValues: req.Data,
+		Text:            req.Text,
+	}
+
+	// Process the request
+	legacyResp, err := h.analyzer.AnalyzeTrends(ctx, legacyReq)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert to standard response format
+	resp := &analysis.StandardAnalysisResponse{
+		AnalysisType: "trends",
+		WorkflowID:   req.WorkflowID,
+		Timestamp:    time.Now(),
+		Results:      legacyResp.Results,
+		Confidence:   legacyResp.Confidence,
+	}
+
+	// Extract data quality if available
+	if results, ok := legacyResp.Results.(map[string]interface{}); ok {
+		if dataQuality, ok := results["data_quality"].(map[string]interface{}); ok {
+			assessment, _ := dataQuality["assessment"].(string)
+			limitations, _ := dataQuality["limitations"].([]string)
+			
+			// If limitations is an []interface{}, convert to []string
+			if limitIface, ok := dataQuality["limitations"].([]interface{}); ok {
+				limitations = make([]string, 0, len(limitIface))
+				for _, v := range limitIface {
+					if str, ok := v.(string); ok {
+						limitations = append(limitations, str)
+					}
+				}
+			}
+			
+			resp.DataQuality.Assessment = assessment
+			resp.DataQuality.Limitations = limitations
+		}
+	}
+
+	return resp, nil
+}
+
+// handlePatternsAnalysis processes a patterns analysis request
+func (h *AnalysisHandler) handlePatternsAnalysis(ctx context.Context, req analysis.StandardAnalysisRequest) (*analysis.StandardAnalysisResponse, error) {
+	// Extract parameters
+	patternTypes, err := extractStringSlice(req.Parameters, "pattern_types")
+	if err != nil {
+		return nil, fmt.Errorf("invalid pattern_types parameter: %w", err)
+	}
+
+	// Convert to legacy request format
+	legacyReq := analysis.AnalysisRequest{
+		PatternTypes:    patternTypes,
+		AttributeValues: req.Data,
+		Text:            req.Text,
+	}
+
+	// Process the request
+	legacyResp, err := h.analyzer.IdentifyPatterns(ctx, legacyReq)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert to standard response format
+	resp := &analysis.StandardAnalysisResponse{
+		AnalysisType: "patterns",
+		WorkflowID:   req.WorkflowID,
+		Timestamp:    time.Now(),
+		Results:      legacyResp.Results,
+		Confidence:   legacyResp.Confidence,
+	}
+
+	return resp, nil
+}
+
+// handleFindingsAnalysis processes a findings analysis request
+func (h *AnalysisHandler) handleFindingsAnalysis(ctx context.Context, req analysis.StandardAnalysisRequest) (*analysis.StandardAnalysisResponse, error) {
+	// Extract parameters
+	questions, err := extractStringSlice(req.Parameters, "questions")
+	if err != nil {
+		return nil, fmt.Errorf("invalid questions parameter: %w", err)
+	}
+
+	// Convert to legacy request format
+	legacyReq := analysis.AnalysisRequest{
+		Questions:       questions,
+		AttributeValues: req.Data,
+		Text:            req.Text,
+	}
+
+	// Process the request
+	legacyResp, err := h.analyzer.AnalyzeFindings(ctx, legacyReq)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert to standard response format
+	resp := &analysis.StandardAnalysisResponse{
+		AnalysisType: "findings",
+		WorkflowID:   req.WorkflowID,
+		Timestamp:    time.Now(),
+		Results:      legacyResp.Results,
+		Confidence:   legacyResp.Confidence,
+	}
+
+	// Extract data gaps if available
+	if results, ok := legacyResp.Results.(map[string]interface{}); ok {
+		if dataGaps, ok := results["data_gaps"].([]interface{}); ok {
+			gaps := make([]string, 0, len(dataGaps))
+			for _, gap := range dataGaps {
+				if gapStr, ok := gap.(string); ok {
+					gaps = append(gaps, gapStr)
+				}
+			}
+			
+			resp.DataQuality.Limitations = gaps
+			resp.DataQuality.Assessment = "Based on identified data gaps"
+		}
+	}
+
+	return resp, nil
+}
+
+// handleAttributesAnalysis processes an attributes analysis request
+func (h *AnalysisHandler) handleAttributesAnalysis(ctx context.Context, req analysis.StandardAnalysisRequest) (*analysis.StandardAnalysisResponse, error) {
+	// Check if this is a generate_required request
+	generateRequired, _ := req.Parameters["generate_required"].(bool)
+	
+	if generateRequired {
+		// Extract questions for generating required attributes
+		questions, err := extractStringSlice(req.Parameters, "questions")
+		if err != nil {
+			return nil, fmt.Errorf("invalid questions parameter: %w", err)
+		}
+		
+		// Get existing attributes for reference
+		var existingAttributes []string
+		if existingAttrs, ok := req.Parameters["existing_attributes"].([]interface{}); ok {
+			for _, attr := range existingAttrs {
+				if attrStr, ok := attr.(string); ok {
+					existingAttributes = append(existingAttributes, attrStr)
+				}
+			}
+		}
+		
+		// Generate required attributes
+		attributes, err := h.textGenerator.GenerateRequiredAttributes(ctx, questions, existingAttributes)
+		if err != nil {
+			return nil, err
+		}
+		
+		// Return generated attributes in standard response
+		resp := &analysis.StandardAnalysisResponse{
+			AnalysisType: "attributes",
+			WorkflowID:   req.WorkflowID,
+			Timestamp:    time.Now(),
+			Results:      map[string]interface{}{"attributes": attributes},
+			Confidence:   0.9,
+		}
+		
+		return resp, nil
+	} else {
+		// Handle attribute extraction
+		// Extract attributes definition
+		attributesRaw, ok := req.Parameters["attributes"].([]interface{})
+		if !ok || len(attributesRaw) == 0 {
+			return nil, fmt.Errorf("attributes parameter is required and must be an array")
+		}
+		
+		// Convert to AttributeDefinition array
+		attributes := make([]analysis.AttributeDefinition, 0, len(attributesRaw))
+		for _, attrRaw := range attributesRaw {
+			if attrMap, ok := attrRaw.(map[string]interface{}); ok {
+				attr := analysis.AttributeDefinition{
+					FieldName:   getString(attrMap, "field_name"),
+					Title:       getString(attrMap, "title"),
+					Description: getString(attrMap, "description"),
+					Rationale:   getString(attrMap, "rationale"),
+				}
+				
+				if attr.FieldName != "" {
+					attributes = append(attributes, attr)
+				}
+			}
+		}
+		
+		if len(attributes) == 0 {
+			return nil, fmt.Errorf("at least one valid attribute definition is required")
+		}
+		
+		// Process attribute extraction
+		attributeValues, err := h.textGenerator.GenerateAttributes(ctx, req.Text, attributes)
+		if err != nil {
+			return nil, err
+		}
+		
+		// Return extracted attributes in standard response
+		resp := &analysis.StandardAnalysisResponse{
+			AnalysisType: "attributes",
+			WorkflowID:   req.WorkflowID,
+			Timestamp:    time.Now(),
+			Results:      map[string]interface{}{"attribute_values": attributeValues},
+			Confidence:   0.9,
+		}
+		
+		return resp, nil
+	}
+}
+
+// handleIntentAnalysis processes an intent analysis request
+func (h *AnalysisHandler) handleIntentAnalysis(ctx context.Context, req analysis.StandardAnalysisRequest) (*analysis.StandardAnalysisResponse, error) {
+	// Validate request
+	if req.Text == "" {
+		return nil, fmt.Errorf("text is required for intent analysis")
+	}
+	
+	// Process the intent generation
+	intent, err := h.textGenerator.GenerateIntent(ctx, req.Text)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Return generated intent in standard response
+	resp := &analysis.StandardAnalysisResponse{
+		AnalysisType: "intent",
+		WorkflowID:   req.WorkflowID,
+		Timestamp:    time.Now(),
+		Results:      intent,
+		Confidence:   0.9,
+	}
+	
+	return resp, nil
+}
+
+// Helper functions to extract values from parameters
+func extractStringSlice(params map[string]interface{}, key string) ([]string, error) {
+	if params == nil {
+		return nil, fmt.Errorf("%s is required", key)
+	}
+	
+	raw, ok := params[key]
+	if !ok {
+		return nil, fmt.Errorf("%s is required", key)
+	}
+	
+	// Handle slice already in string format
+	if strSlice, ok := raw.([]string); ok {
+		return strSlice, nil
+	}
+	
+	// Handle slice as interface array
+	if ifaceSlice, ok := raw.([]interface{}); ok {
+		result := make([]string, 0, len(ifaceSlice))
+		for _, v := range ifaceSlice {
+			if str, ok := v.(string); ok {
+				result = append(result, str)
+			}
+		}
+		
+		if len(result) == 0 {
+			return nil, fmt.Errorf("%s must contain strings", key)
+		}
+		
+		return result, nil
+	}
+	
+	return nil, fmt.Errorf("%s must be an array", key)
+}
+
+// Helper function to safely get string from map
+func getString(m map[string]interface{}, key string) string {
+	if val, ok := m[key]; ok {
+		if str, ok := val.(string); ok {
+			return str
+		}
+	}
+	return ""
 } 

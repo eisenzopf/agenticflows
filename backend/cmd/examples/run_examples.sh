@@ -10,14 +10,10 @@ NC='\033[0m' # No Color
 # Default parameters
 DB_PATH=""
 OUTPUT_DIR="./output"
-WORKFLOW_ID="example-$(date +%Y%m%d%H%M%S)"
+WORKFLOW_ID="example-workflow-$(date +%Y%m%d-%H%M%S)"
 DEBUG=false
 LIMIT=10
-SAMPLE_SIZE=3
-MIN_COUNT=100
-TARGET_CLASS="fee dispute"
-INTENTS="cancel,upgrade,billing"
-THRESHOLD=0.7
+RUN_ALL=false
 
 # Function to display script usage
 function show_usage {
@@ -26,20 +22,15 @@ function show_usage {
     echo "Usage: $0 [options] [script-name]"
     echo ""
     echo "Options:"
-    echo "  -d, --database PATH     Path to SQLite database (required)"
-    echo "  -o, --output DIR        Directory for output files (default: ./output)"
-    echo "  -w, --workflow ID       Workflow ID (default: generated timestamp)"
-    echo "  -l, --limit NUM         Limit number of items to process (default: 10)"
-    echo "  -s, --sample NUM        Sample size for conversation analysis (default: 3)"
-    echo "  -m, --min-count NUM     Minimum count threshold (default: 100)"
-    echo "  -t, --target CLASS      Target class for analysis (default: 'fee dispute')"
-    echo "  -i, --intents LIST      Comma-separated list of intents (default: cancel,upgrade,billing)"
-    echo "  -c, --confidence NUM    Confidence threshold (default: 0.7)"
-    echo "  -v, --verbose           Enable verbose/debug output"
-    echo "  -h, --help              Show this help message"
+    echo "  -d, --db PATH         Path to SQLite database (required)"
+    echo "  -o, --output DIR      Directory for output files (default: ./output)"
+    echo "  -w, --workflow ID     Workflow ID (default: generated timestamp)"
+    echo "  -l, --limit NUM       Limit number of items to process (default: 10)"
+    echo "  -v, --verbose         Enable verbose/debug output"
+    echo "  all                   Run all example scripts"
+    echo "  -h, --help            Show this help message"
     echo ""
     echo "Available scripts:"
-    echo "  all                     Run all example scripts"
     echo "  generate_intents        Generate conversation intents"
     echo "  generate_attributes     Generate attribute values for conversations"
     echo "  group_intents           Group similar intents together"
@@ -57,7 +48,7 @@ function show_usage {
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
-        -d|--database)
+        -d|--db)
             DB_PATH="$2"
             shift 2
             ;;
@@ -73,243 +64,103 @@ while [[ $# -gt 0 ]]; do
             LIMIT="$2"
             shift 2
             ;;
-        -s|--sample)
-            SAMPLE_SIZE="$2"
-            shift 2
-            ;;
-        -m|--min-count)
-            MIN_COUNT="$2"
-            shift 2
-            ;;
-        -t|--target)
-            TARGET_CLASS="$2"
-            shift 2
-            ;;
-        -i|--intents)
-            INTENTS="$2"
-            shift 2
-            ;;
-        -c|--confidence)
-            THRESHOLD="$2"
-            shift 2
-            ;;
-        -v|--verbose)
+        --debug)
             DEBUG=true
+            shift
+            ;;
+        all)
+            RUN_ALL=true
             shift
             ;;
         -h|--help)
             show_usage
             exit 0
             ;;
-        -*)
-            echo -e "${RED}Error: Unknown option $1${NC}"
-            show_usage
-            exit 1
-            ;;
         *)
-            SCRIPT_NAME="$1"
-            shift
+            echo "Unknown argument: $1"
+            exit 1
             ;;
     esac
 done
 
 # Validate required parameters
 if [ -z "$DB_PATH" ]; then
-    echo -e "${RED}Error: Database path is required (-d, --database)${NC}"
-    show_usage
+    echo "Error: Database path is required. Use -d or --db to specify."
     exit 1
 fi
 
-if [ -z "$SCRIPT_NAME" ]; then
-    echo -e "${RED}Error: Script name is required${NC}"
-    show_usage
+if [ ! -f "$DB_PATH" ]; then
+    echo "Error: Database file not found: $DB_PATH"
     exit 1
 fi
 
 # Create output directory if it doesn't exist
 mkdir -p "$OUTPUT_DIR"
 
-# Set debug flag
+# Print configuration
+echo -e "Starting Conversation Analysis Examples"
+echo -e "Database: $DB_PATH"
+echo -e "Workflow ID: $WORKFLOW_ID"
+echo -e "Output Directory: $OUTPUT_DIR"
+echo -e ""
+
+# Set up debug flag
 DEBUG_FLAG=""
 if [ "$DEBUG" = true ]; then
     DEBUG_FLAG="--debug"
 fi
 
-# Run generate_intents script
-function run_generate_intents {
-    echo -e "${GREEN}Running generate_intents script...${NC}"
-    OUTPUT_FILE="$OUTPUT_DIR/intents_$(date +%Y%m%d%H%M%S).json"
+# Function to run a script and check its status
+run_script() {
+    local script_dir=$1
+    local script_name=$2
+    echo -e "\n=== Running $script_name ==="
     
-    go run utils.go generate_intents.go \
-        --db "$DB_PATH" \
-        --output "$OUTPUT_FILE" \
-        --limit "$LIMIT" \
-        --workflow "$WORKFLOW_ID" \
-        $DEBUG_FLAG
-    
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}✓ generate_intents completed successfully${NC}"
-        echo -e "  Output: $OUTPUT_FILE"
+    if [ -d "$script_dir" ]; then
+        cd "$script_dir"
+        
+        # Set script-specific flags
+        local extra_flags=""
+        case "$script_dir" in
+            "group_intents")
+                extra_flags="--min-count 5 --max-groups 10"
+                ;;
+            *)
+                extra_flags="--limit $LIMIT"
+                ;;
+        esac
+        
+        go run main.go --db "$DB_PATH" --workflow "$WORKFLOW_ID" $DEBUG_FLAG $extra_flags
+        if [ $? -eq 0 ]; then
+            echo -e "✓ $script_name completed successfully"
+        else
+            echo -e "✗ $script_name failed"
+        fi
+        cd ..
     else
-        echo -e "${RED}✗ generate_intents failed${NC}"
-    fi
-    echo ""
-}
-
-# Run generate_attributes script
-function run_generate_attributes {
-    echo -e "${GREEN}Running generate_attributes script...${NC}"
-    OUTPUT_FILE="$OUTPUT_DIR/attributes_$(date +%Y%m%d%H%M%S).json"
-    
-    go run utils.go generate_attributes.go \
-        --db "$DB_PATH" \
-        --output "$OUTPUT_FILE" \
-        --min-count "$MIN_COUNT" \
-        --limit "$LIMIT" \
-        --target-class "$TARGET_CLASS" \
-        --threshold "$THRESHOLD" \
-        --workflow "$WORKFLOW_ID" \
-        $DEBUG_FLAG
-    
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}✓ generate_attributes completed successfully${NC}"
-        echo -e "  Output: $OUTPUT_FILE"
-    else
-        echo -e "${RED}✗ generate_attributes failed${NC}"
-    fi
-    echo ""
-}
-
-# Run group_intents script
-function run_group_intents {
-    echo -e "${GREEN}Running group_intents script...${NC}"
-    OUTPUT_FILE="$OUTPUT_DIR/intent_groups_$(date +%Y%m%d%H%M%S).json"
-    
-    go run utils.go group_intents.go \
-        --db "$DB_PATH" \
-        --output "$OUTPUT_FILE" \
-        --min-count "$MIN_COUNT" \
-        --max-groups 20 \
-        --workflow "$WORKFLOW_ID" \
-        $DEBUG_FLAG
-    
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}✓ group_intents completed successfully${NC}"
-        echo -e "  Output: $OUTPUT_FILE"
-    else
-        echo -e "${RED}✗ group_intents failed${NC}"
-    fi
-    echo ""
-}
-
-# Run identify_attributes script
-function run_identify_attributes {
-    echo -e "${GREEN}Running identify_attributes script...${NC}"
-    
-    # Run the script
-    go run identify_attributes.go utils.go \
-        --db "$DB_PATH" \
-        --output "$OUTPUT_DIR/attribute_definitions.json" \
-        --intent "$TARGET_CLASS" \
-        --workflow "$WORKFLOW_ID" \
-        --limit "$LIMIT" $DEBUG_FLAG
-    
-    # Check if the script ran successfully
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}✓ identify_attributes completed successfully${NC}"
-        return 0
-    else
-        echo -e "${RED}✗ identify_attributes failed${NC}"
-        return 1
+        echo -e "✗ $script_name directory not found: $script_dir"
     fi
 }
 
-# Run match_intents script
-function run_match_intents {
-    echo -e "${GREEN}Running match_intents script...${NC}"
-    OUTPUT_FILE="$OUTPUT_DIR/intent_matching_$(date +%Y%m%d%H%M%S).json"
-    
-    go run utils.go match_intents.go \
-        --db "$DB_PATH" \
-        --output "$OUTPUT_FILE" \
-        --intents "$INTENTS" \
-        --limit "$LIMIT" \
-        --threshold "$THRESHOLD" \
-        --workflow "$WORKFLOW_ID" \
-        $DEBUG_FLAG
-    
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}✓ match_intents completed successfully${NC}"
-        echo -e "  Output: $OUTPUT_FILE"
-    else
-        echo -e "${RED}✗ match_intents failed${NC}"
-    fi
-    echo ""
-}
+# Run all scripts
+echo -e "Running example scripts..."
 
-# Run analyze_fee_disputes script
-function run_analyze_fee_disputes {
-    echo -e "${GREEN}Running analyze_fee_disputes script...${NC}"
-    OUTPUT_FILE="$OUTPUT_DIR/fee_dispute_analysis_$(date +%Y%m%d%H%M%S).json"
-    
-    go run utils.go analyze_fee_disputes.go \
-        --db "$DB_PATH" \
-        --output "$OUTPUT_FILE" \
-        --min-count "$MIN_COUNT" \
-        --limit "$LIMIT" \
-        --workflow "$WORKFLOW_ID" \
-        $DEBUG_FLAG
-    
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}✓ analyze_fee_disputes completed successfully${NC}"
-        echo -e "  Output: $OUTPUT_FILE"
-    else
-        echo -e "${RED}✗ analyze_fee_disputes failed${NC}"
-    fi
-    echo ""
-}
+# Generate Intents
+run_script "generate_intents" "Generate Intents"
 
-# Main script execution
-echo -e "${BLUE}Starting Conversation Analysis Examples${NC}"
-echo -e "Database: ${YELLOW}$DB_PATH${NC}"
-echo -e "Workflow ID: ${YELLOW}$WORKFLOW_ID${NC}"
-echo -e "Output Directory: ${YELLOW}$OUTPUT_DIR${NC}"
-echo ""
+# Generate Attributes
+run_script "generate_attributes" "Generate Attributes"
 
-case "$SCRIPT_NAME" in
-    all)
-        echo -e "${BLUE}Running all example scripts...${NC}"
-        echo ""
-        run_generate_intents
-        run_generate_attributes
-        run_group_intents
-        run_identify_attributes
-        run_match_intents
-        run_analyze_fee_disputes
-        ;;
-    generate_intents)
-        run_generate_intents
-        ;;
-    generate_attributes)
-        run_generate_attributes
-        ;;
-    group_intents)
-        run_group_intents
-        ;;
-    identify_attributes)
-        run_identify_attributes
-        ;;
-    match_intents)
-        run_match_intents
-        ;;
-    analyze_fee_disputes)
-        run_analyze_fee_disputes
-        ;;
-    *)
-        echo -e "${RED}Error: Unknown script name '$SCRIPT_NAME'${NC}"
-        show_usage
-        exit 1
-        ;;
-esac
+# Group Intents
+run_script "group_intents" "Group Intents"
 
-echo -e "${GREEN}All tasks completed.${NC}" 
+# Identify Attributes
+run_script "identify_attributes" "Identify Attributes"
+
+# Match Intents
+run_script "match_intents" "Match Intents"
+
+# Analyze Fee Disputes
+run_script "analyze_fee_disputes" "Analyze Fee Disputes"
+
+echo -e "\nAll tasks completed." 

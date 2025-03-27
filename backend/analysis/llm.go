@@ -24,8 +24,8 @@ type LLMClient struct {
 
 // LLMRequest represents a request to the Gemini API
 type LLMRequest struct {
-	Contents      []Content              `json:"contents"`
-	GenerationConfig GenerationConfig    `json:"generationConfig"`
+	Contents         []Content        `json:"contents"`
+	GenerationConfig GenerationConfig `json:"generationConfig"`
 }
 
 // Content represents content in an LLM request
@@ -48,14 +48,14 @@ type GenerationConfig struct {
 
 // LLMResponse represents a response from the Gemini API
 type LLMResponse struct {
-	Candidates []Candidate `json:"candidates"`
+	Candidates     []Candidate    `json:"candidates"`
 	PromptFeedback PromptFeedback `json:"promptFeedback,omitempty"`
 }
 
 // Candidate represents a generated response candidate
 type Candidate struct {
-	Content Content `json:"content"`
-	FinishReason string `json:"finishReason"`
+	Content      Content `json:"content"`
+	FinishReason string  `json:"finishReason"`
 }
 
 // NewLLMClient creates a new LLM client
@@ -129,9 +129,9 @@ func (c *LLMClient) GenerateContent(ctx context.Context, prompt string, expected
 
 // makeRequest sends the HTTP request to the LLM API
 func (c *LLMClient) makeRequest(ctx context.Context, prompt string) (string, error) {
-	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", 
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
 		c.modelName, c.apiKey)
-	
+
 	req := LLMRequest{
 		Contents: []Content{
 			{
@@ -144,12 +144,12 @@ func (c *LLMClient) makeRequest(ctx context.Context, prompt string) (string, err
 		},
 		GenerationConfig: GenerationConfig{
 			Temperature: 0.0,
-			MaxTokens:   1024,
+			MaxTokens:   8192,
 			TopP:        0.95,
 			TopK:        40,
 		},
 	}
-	
+
 	reqBody, err := json.Marshal(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal request: %w", err)
@@ -258,7 +258,7 @@ func (c *LLMClient) validateResponse(response interface{}, expectedFormat interf
 func (c *LLMClient) GenerateResponses(ctx context.Context, prompts []string, expectedFormat interface{}) ([]interface{}, error) {
 	results := make([]interface{}, len(prompts))
 	errChan := make(chan error, len(prompts))
-	
+
 	// Create a context that can be cancelled
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -285,4 +285,4 @@ func (c *LLMClient) GenerateResponses(ctx context.Context, prompts []string, exp
 	}
 
 	return results, lastErr
-} 
+}
