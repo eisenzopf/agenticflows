@@ -20,6 +20,8 @@ func main() {
 	timespan := flag.String("timespan", "6 months", "Timespan for implementation")
 	debug := flag.Bool("debug", false, "Enable debug mode")
 	workflowID := flag.String("workflow", "", "Workflow ID for persisting results")
+	// Adding mock flag for consistency, though this script already uses sample data
+	_ = flag.Bool("mock", false, "Use mock data (this script always uses sample data)")
 	flag.Parse()
 
 	// Initialize API client

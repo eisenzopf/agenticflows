@@ -14,6 +14,7 @@ WORKFLOW_ID="example-workflow-$(date +%Y%m%d-%H%M%S)"
 DEBUG=false
 LIMIT=10
 RUN_ALL=false
+USE_MOCK=false
 
 # Function to display script usage
 function show_usage {
@@ -22,26 +23,25 @@ function show_usage {
     echo "Usage: $0 [options] [script-name]"
     echo ""
     echo "Options:"
-    echo "  -d, --db PATH         Path to SQLite database (required)"
+    echo "  -d, --db PATH         Path to SQLite database (optional if using mock data)"
     echo "  -o, --output DIR      Directory for output files (default: ./output)"
     echo "  -w, --workflow ID     Workflow ID (default: generated timestamp)"
     echo "  -l, --limit NUM       Limit number of items to process (default: 10)"
     echo "  -v, --verbose         Enable verbose/debug output"
+    echo "  -m, --mock            Use mock data instead of database"
     echo "  all                   Run all example scripts"
     echo "  -h, --help            Show this help message"
     echo ""
     echo "Available scripts:"
     echo "  generate_intents        Generate conversation intents"
-    echo "  generate_attributes     Generate attribute values for conversations"
-    echo "  group_intents           Group similar intents together"
-    echo "  identify_attributes     Identify attribute definitions for conversations"
-    echo "  match_intents           Match and evaluate intent classifications"
-    echo "  analyze_fee_disputes    Analyze fee dispute conversations"
+    echo "  create_action_plan      Create action plan (doesn't need database)"
+    echo ""
+    echo "When using -m (mock) flag, only scripts that support mock data will run."
     echo ""
     echo "Examples:"
     echo "  $0 -d ./data.db all"
     echo "  $0 -d ./data.db -w my-workflow generate_intents"
-    echo "  $0 -d ./data.db -t 'subscription cancel' -v identify_attributes"
+    echo "  $0 -m all                         # Run with mock data"
     echo ""
 }
 
@@ -64,6 +64,10 @@ while [[ $# -gt 0 ]]; do
             LIMIT="$2"
             shift 2
             ;;
+        -m|--mock)
+            USE_MOCK=true
+            shift
+            ;;
         --debug)
             DEBUG=true
             shift
@@ -83,15 +87,17 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Validate required parameters
-if [ -z "$DB_PATH" ]; then
-    echo "Error: Database path is required. Use -d or --db to specify."
+# Validate database path if not using mock data
+if [ "$USE_MOCK" = false ] && [ -z "$DB_PATH" ]; then
+    echo "Error: Database path is required when not using mock data. Use -d or --db to specify, or use -m for mock data."
     exit 1
 fi
 
-if [ ! -f "$DB_PATH" ]; then
-    echo "Error: Database file not found: $DB_PATH"
-    exit 1
+# Check if database exists when specified
+if [ -n "$DB_PATH" ] && [ ! -f "$DB_PATH" ]; then
+    echo "Warning: Database file not found: $DB_PATH"
+    echo "Using mock data instead."
+    USE_MOCK=true
 fi
 
 # Create output directory if it doesn't exist
@@ -99,7 +105,7 @@ mkdir -p "$OUTPUT_DIR"
 
 # Print configuration
 echo -e "Starting Conversation Analysis Examples"
-echo -e "Database: $DB_PATH"
+echo -e "Database: ${DB_PATH:-"Using mock data"}"
 echo -e "Workflow ID: $WORKFLOW_ID"
 echo -e "Output Directory: $OUTPUT_DIR"
 echo -e ""
@@ -108,6 +114,14 @@ echo -e ""
 DEBUG_FLAG=""
 if [ "$DEBUG" = true ]; then
     DEBUG_FLAG="--debug"
+fi
+
+# Set up mock flag
+MOCK_FLAG=""
+if [ "$USE_MOCK" = true ]; then
+    MOCK_FLAG="--mock"
+    echo -e "${YELLOW}Using mock data for all examples${NC}"
+    echo -e "${YELLOW}Note: Only some scripts support mock data at this time${NC}"
 fi
 
 # Function to run a script and check its status
@@ -121,7 +135,12 @@ run_script() {
         
         # Set script-specific flags
         local extra_flags=""
-        local db_flag="--db \"$DB_PATH\""
+        local db_flag=""
+        
+        # Only add DB flag if not using mock data
+        if [ "$USE_MOCK" = false ]; then
+            db_flag="--db \"$DB_PATH\""
+        fi
         
         case "$script_dir" in
             "group_intents")
@@ -142,7 +161,10 @@ run_script() {
                 ;;
         esac
         
-        go run main.go $db_flag --workflow "$WORKFLOW_ID" $DEBUG_FLAG $extra_flags
+        # Run command with appropriate flags
+        run_cmd="go run main.go $db_flag --workflow \"$WORKFLOW_ID\" $DEBUG_FLAG $MOCK_FLAG $extra_flags"
+        eval $run_cmd
+        
         if [ $? -eq 0 ]; then
             echo -e "✓ $script_name completed successfully"
         else
@@ -154,31 +176,41 @@ run_script() {
     fi
 }
 
-# Run all scripts
+# Run example scripts
 echo -e "Running example scripts..."
 
-# Generate Intents
-run_script "generate_intents" "Generate Intents"
+# When using mock data, only run scripts that support it
+if [ "$USE_MOCK" = true ]; then
+    # Generate Intents (supports mock data)
+    run_script "generate_intents" "Generate Intents"
+    
+    # Create Action Plan (already uses sample data)
+    run_script "create_action_plan" "Create Action Plan"
+else
+    # Run all scripts when using a real database
+    # Generate Intents
+    run_script "generate_intents" "Generate Intents"
 
-# Generate Attributes
-run_script "generate_attributes" "Generate Attributes"
+    # Generate Attributes
+    run_script "generate_attributes" "Generate Attributes"
 
-# Group Intents
-run_script "group_intents" "Group Intents"
+    # Group Intents
+    run_script "group_intents" "Group Intents"
 
-# Identify Attributes
-run_script "identify_attributes" "Identify Attributes"
+    # Identify Attributes
+    run_script "identify_attributes" "Identify Attributes"
 
-# Match Intents
-run_script "match_intents" "Match Intents"
+    # Match Intents
+    run_script "match_intents" "Match Intents"
 
-# Generate Recommendations
-run_script "generate_recommendations" "Generate Recommendations"
+    # Generate Recommendations
+    run_script "generate_recommendations" "Generate Recommendations"
 
-# Create Action Plan
-run_script "create_action_plan" "Create Action Plan"
+    # Create Action Plan
+    run_script "create_action_plan" "Create Action Plan"
 
-# Analyze Fee Disputes
-run_script "analyze_fee_disputes" "Analyze Fee Disputes"
+    # Analyze Fee Disputes
+    run_script "analyze_fee_disputes" "Analyze Fee Disputes"
+fi
 
 echo -e "\nAll tasks completed." 

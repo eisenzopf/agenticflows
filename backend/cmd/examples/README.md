@@ -21,11 +21,12 @@ This directory contains a collection of Go scripts that demonstrate how to use t
 | `run_examples.sh` | Shell script to run individual or all examples easily |
 | `SCRIPT_USAGE.md` | Detailed instructions on using the shell script |
 | `PIPELINE_OVERVIEW.md` | Overview of how the scripts work together in a pipeline |
+| `MOCK_DATA_USAGE.md` | Instructions for using scripts with mock data instead of a database |
 
 ## Getting Started
 
 1. Make sure the API server is running (typically at http://localhost:8080)
-2. Ensure you have a SQLite database with conversation data
+2. Ensure you have a SQLite database with conversation data (or use mock data - see below)
 3. Make the shell script executable:
    ```bash
    chmod +x run_examples.sh
@@ -36,6 +37,16 @@ This directory contains a collection of Go scripts that demonstrate how to use t
    ```
 
 See `SCRIPT_USAGE.md` for detailed instructions and options.
+
+## Using Mock Data
+
+You can now run the example scripts without a database by using mock data:
+
+```bash
+./run_examples.sh -m all
+```
+
+This uses predefined sample data instead of querying a database. Currently, only some scripts support mock data. See `MOCK_DATA_USAGE.md` for more details.
 
 ## Script Functionality
 
