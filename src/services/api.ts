@@ -95,6 +95,22 @@ export const api = {
         analysisType: 'intent'
       },
       {
+        id: 'analysis-recommendations',
+        type: 'function',
+        label: 'Generate Recommendations',
+        endpoint: '/api/analysis',
+        description: 'Generate actionable recommendations based on analysis results',
+        analysisType: 'recommendations'
+      },
+      {
+        id: 'analysis-plan',
+        type: 'function',
+        label: 'Create Action Plan',
+        endpoint: '/api/analysis',
+        description: 'Create implementation plan from recommendations with timeline and resources',
+        analysisType: 'plan'
+      },
+      {
         id: 'analysis-chain',
         type: 'function',
         label: 'Chain Analysis',

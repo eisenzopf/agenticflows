@@ -18,9 +18,11 @@ import (
 
 // AnalysisHandler handles analysis API requests
 type AnalysisHandler struct {
-	analyzer      *analysis.Analyzer
-	textGenerator *analysis.TextGenerator
-	apiKey        string
+	analyzer             *analysis.Analyzer
+	textGenerator        *analysis.TextGenerator
+	recommendationEngine *analysis.RecommendationEngine
+	planner              *analysis.Planner
+	apiKey               string
 }
 
 // NewAnalysisHandler creates a new handler for analysis endpoints
@@ -47,10 +49,23 @@ func NewAnalysisHandler() (*AnalysisHandler, error) {
 		return nil, fmt.Errorf("failed to create text generator: %w", err)
 	}
 
+	// Create recommendation engine and planner
+	recommendationEngine, err := analysis.NewRecommendationEngine(apiKey, false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create recommendation engine: %w", err)
+	}
+
+	planner, err := analysis.NewPlanner(apiKey, false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create planner: %w", err)
+	}
+
 	return &AnalysisHandler{
-		analyzer:      analyzer,
-		textGenerator: textGenerator,
-		apiKey:        apiKey,
+		analyzer:             analyzer,
+		textGenerator:        textGenerator,
+		recommendationEngine: recommendationEngine,
+		planner:              planner,
+		apiKey:               apiKey,
 	}, nil
 }
 
@@ -429,6 +444,10 @@ func (h *AnalysisHandler) handleAnalysis(w http.ResponseWriter, r *http.Request)
 		resp, err = h.handleAttributesAnalysis(r.Context(), req)
 	case "intent":
 		resp, err = h.handleIntentAnalysis(r.Context(), req)
+	case "recommendations":
+		resp, err = h.handleRecommendationsAnalysis(r.Context(), req)
+	case "plan":
+		resp, err = h.handlePlanAnalysis(r.Context(), req)
 	default:
 		sendAnalysisError(w, "invalid_analysis_type", "Invalid analysis type", http.StatusBadRequest)
 		return
@@ -722,6 +741,156 @@ func (h *AnalysisHandler) handleIntentAnalysis(ctx context.Context, req analysis
 	}
 
 	return resp, nil
+}
+
+// handleRecommendationsAnalysis processes a recommendations analysis request
+func (h *AnalysisHandler) handleRecommendationsAnalysis(ctx context.Context, req analysis.StandardAnalysisRequest) (*analysis.StandardAnalysisResponse, error) {
+	// Extract parameters
+	focusArea, _ := req.Parameters["focus_area"].(string)
+	if focusArea == "" {
+		// Default to a general focus area if not specified
+		focusArea = "improving customer experience"
+	}
+
+	// Extract prioritization criteria if provided
+	criteriaRaw, hasCriteria := req.Parameters["criteria"].(map[string]interface{})
+
+	// Convert to the format expected by the recommendation engine
+	var data map[string]interface{}
+	if req.Data != nil {
+		data = req.Data
+	} else {
+		// Create an empty data map if none provided
+		data = make(map[string]interface{})
+	}
+
+	// Generate recommendations
+	recs, err := h.recommendationEngine.GenerateRecommendations(ctx, data, focusArea)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate recommendations: %w", err)
+	}
+
+	// If prioritization criteria are provided, prioritize the recommendations
+	if hasCriteria && len(recs.ImmediateActions) > 0 {
+		// Convert criteria to the expected format
+		criteria := make(map[string]float64)
+		for k, v := range criteriaRaw {
+			if fv, ok := v.(float64); ok {
+				criteria[k] = fv
+			} else if iv, ok := v.(int); ok {
+				criteria[k] = float64(iv)
+			}
+		}
+
+		// Prioritize recommendations if we have valid criteria
+		if len(criteria) > 0 {
+			prioritizedRecs, err := h.recommendationEngine.PrioritizeRecommendations(ctx, recs.ImmediateActions, criteria)
+			if err == nil {
+				recs.ImmediateActions = prioritizedRecs
+			} else {
+				log.Printf("Warning: Failed to prioritize recommendations: %v", err)
+			}
+		}
+	}
+
+	// Return standardized response
+	resp := &analysis.StandardAnalysisResponse{
+		AnalysisType: "recommendations",
+		WorkflowID:   req.WorkflowID,
+		Timestamp:    time.Now(),
+		Results:      recs,
+		Confidence:   0.85,
+	}
+
+	return resp, nil
+}
+
+// handlePlanAnalysis processes a plan generation request
+func (h *AnalysisHandler) handlePlanAnalysis(ctx context.Context, req analysis.StandardAnalysisRequest) (*analysis.StandardAnalysisResponse, error) {
+	// Check if we're generating a timeline or a full action plan
+	generateTimeline, _ := req.Parameters["generate_timeline"].(bool)
+
+	if generateTimeline {
+		// Extract action plan and resources
+		actionPlanRaw, ok := req.Data["action_plan"].(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("action_plan is required in data field")
+		}
+
+		// Convert to ActionPlan
+		actionPlanBytes, err := json.Marshal(actionPlanRaw)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal action plan: %w", err)
+		}
+
+		var actionPlan analysis.ActionPlan
+		if err := json.Unmarshal(actionPlanBytes, &actionPlan); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal action plan: %w", err)
+		}
+
+		// Extract resources
+		resources, ok := req.Data["resources"].(map[string]interface{})
+		if !ok {
+			resources = make(map[string]interface{})
+		}
+
+		// Generate timeline
+		timeline, err := h.planner.GenerateTimeline(ctx, &actionPlan, resources)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate timeline: %w", err)
+		}
+
+		// Return standardized response
+		resp := &analysis.StandardAnalysisResponse{
+			AnalysisType: "plan",
+			WorkflowID:   req.WorkflowID,
+			Timestamp:    time.Now(),
+			Results:      map[string]interface{}{"timeline": timeline},
+			Confidence:   0.8,
+		}
+
+		return resp, nil
+	} else {
+		// Extract recommendations and constraints
+		recsRaw, ok := req.Data["recommendations"].(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("recommendations are required in data field")
+		}
+
+		// Convert to RecommendationResponse
+		recsBytes, err := json.Marshal(recsRaw)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal recommendations: %w", err)
+		}
+
+		var recommendations analysis.RecommendationResponse
+		if err := json.Unmarshal(recsBytes, &recommendations); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal recommendations: %w", err)
+		}
+
+		// Extract constraints
+		constraints, ok := req.Parameters["constraints"].(map[string]interface{})
+		if !ok {
+			constraints = make(map[string]interface{})
+		}
+
+		// Create action plan
+		actionPlan, err := h.planner.CreateActionPlan(ctx, &recommendations, constraints)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create action plan: %w", err)
+		}
+
+		// Return standardized response
+		resp := &analysis.StandardAnalysisResponse{
+			AnalysisType: "plan",
+			WorkflowID:   req.WorkflowID,
+			Timestamp:    time.Now(),
+			Results:      actionPlan,
+			Confidence:   0.85,
+		}
+
+		return resp, nil
+	}
 }
 
 // Helper functions to extract values from parameters

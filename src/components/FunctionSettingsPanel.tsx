@@ -112,6 +112,205 @@ const functionMetadata: Record<string, {
   ]
 }`
   },
+  'analysis-recommendations': {
+    inputs: [
+      { name: 'focus_area', type: 'string', required: true, description: 'Area to focus recommendations on' },
+      { name: 'criteria', type: 'object', required: false, description: 'Criteria for prioritizing recommendations' },
+      { name: 'data', type: 'object', required: true, description: 'Analysis results to base recommendations on' }
+    ],
+    outputs: [
+      { name: 'immediate_actions', type: 'array', description: 'List of recommended actions with rationale, impact, and priority' },
+      { name: 'implementation_notes', type: 'string[]', description: 'Notes on implementing the recommendations' },
+      { name: 'success_metrics', type: 'string[]', description: 'Metrics to measure success of implementations' }
+    ],
+    example: `{
+  "focus_area": "customer retention",
+  "criteria": {
+    "impact": 0.6,
+    "implementation_ease": 0.4
+  },
+  "data": {
+    "trends": [
+      {"focus_area": "customer satisfaction", "trend": "Declining satisfaction scores in Q3"},
+      {"focus_area": "response time", "trend": "Increasing average resolution time"}
+    ],
+    "findings": [
+      {"question": "What are the main pain points?", "answer": "Long wait times and complex processes"}
+    ]
+  }
+}`,
+    responseExample: `{
+  "immediate_actions": [
+    {
+      "action": "Implement callback option for customers on hold for more than 2 minutes",
+      "rationale": "Reduces customer frustration during peak call times",
+      "expected_impact": "15% reduction in call abandonment rate",
+      "priority": 5
+    },
+    {
+      "action": "Simplify the refund process from 5 steps to 2 steps",
+      "rationale": "Current process is overly complex and leads to customer frustration",
+      "expected_impact": "30% reduction in repeat calls about refunds",
+      "priority": 4
+    },
+    {
+      "action": "Proactively notify customers about known service issues",
+      "rationale": "Prevents unnecessary inbound contacts and shows proactive service",
+      "expected_impact": "20% reduction in calls during service incidents",
+      "priority": 3
+    }
+  ],
+  "implementation_notes": [
+    "Begin with highest priority items requiring minimal IT changes",
+    "Schedule implementation during low-volume periods",
+    "Ensure customer service agents receive training on new processes"
+  ],
+  "success_metrics": [
+    "Customer satisfaction scores (target: 15% improvement in 90 days)",
+    "First call resolution rate (target: increase from 65% to 80%)",
+    "Average handle time (target: reduce by 45 seconds)"
+  ]
+}`
+  },
+  'analysis-plan': {
+    inputs: [
+      { name: 'generate_timeline', type: 'boolean', required: false, description: 'Whether to generate a timeline instead of a full plan' },
+      { name: 'constraints', type: 'object', required: false, description: 'Constraints for the plan such as budget and timeline' },
+      { name: 'data', type: 'object', required: true, description: 'Recommendations or action plan to base the plan on' }
+    ],
+    outputs: [
+      { name: 'goals', type: 'string[]', description: 'Goals of the action plan' },
+      { name: 'immediate_actions', type: 'array', description: 'Actions to take immediately' },
+      { name: 'short_term_actions', type: 'array', description: 'Actions to take in the short term' },
+      { name: 'long_term_actions', type: 'array', description: 'Actions to take in the long term' },
+      { name: 'timeline', type: 'array', description: 'Timeline of implementation phases and milestones' },
+      { name: 'risks_mitigations', type: 'array', description: 'Risks and mitigation strategies' }
+    ],
+    example: `{
+  "constraints": {
+    "budget": 50000,
+    "timeline": "6 months",
+    "resources": ["customer_support", "engineering", "marketing"]
+  },
+  "data": {
+    "recommendations": {
+      "immediate_actions": [
+        {
+          "action": "Implement callback option for customers on hold",
+          "rationale": "Reduces customer frustration during peak call times",
+          "expected_impact": "15% reduction in call abandonment rate",
+          "priority": 5
+        },
+        {
+          "action": "Simplify the refund process from 5 steps to 2 steps",
+          "rationale": "Current process is overly complex and leads to customer frustration",
+          "expected_impact": "30% reduction in repeat calls about refunds",
+          "priority": 4
+        }
+      ],
+      "implementation_notes": ["Begin with highest priority items", "Schedule during low-volume periods"],
+      "success_metrics": ["Customer satisfaction scores", "First call resolution rate"]
+    }
+  }
+}`,
+    responseExample: `{
+  "goals": [
+    "Improve customer satisfaction by 20% within 6 months",
+    "Reduce average handle time by 15% within 3 months",
+    "Increase first-call resolution rate to 80% within 4 months"
+  ],
+  "immediate_actions": [
+    {
+      "action": "Implement callback option",
+      "description": "Set up system to capture callbacks for customers on hold over 2 minutes",
+      "priority": 5,
+      "estimated_effort": "2 weeks",
+      "dependencies": [],
+      "responsible_role": "IT Manager"
+    },
+    {
+      "action": "Train agents on new system",
+      "description": "Develop and deliver training on the callback system",
+      "priority": 5,
+      "estimated_effort": "1 week",
+      "dependencies": ["Implement callback option"],
+      "responsible_role": "Training Manager"
+    }
+  ],
+  "short_term_actions": [
+    {
+      "action": "Simplify refund process",
+      "description": "Redesign refund workflow to reduce steps from 5 to 2",
+      "priority": 4,
+      "estimated_effort": "3 weeks",
+      "dependencies": [],
+      "responsible_role": "Process Manager"
+    }
+  ],
+  "long_term_actions": [
+    {
+      "action": "Implement proactive notification system",
+      "description": "Develop system to alert customers of service issues",
+      "priority": 3,
+      "estimated_effort": "8 weeks",
+      "dependencies": ["Analyze customer contact patterns"],
+      "responsible_role": "IT Director"
+    }
+  ],
+  "responsible_parties": [
+    "Customer Support Director",
+    "IT Manager",
+    "Training Manager",
+    "Process Manager"
+  ],
+  "timeline": [
+    {
+      "phase": "Phase 1: Quick Wins",
+      "description": "Implement high-impact, low-effort solutions",
+      "duration": "4 weeks",
+      "milestones": [
+        "Callback system implemented",
+        "Agent training completed",
+        "Initial metrics dashboard created"
+      ]
+    },
+    {
+      "phase": "Phase 2: Process Improvements",
+      "description": "Redesign core customer processes",
+      "duration": "8 weeks",
+      "milestones": [
+        "Refund process simplified",
+        "Knowledge base updated",
+        "Process documentation completed"
+      ]
+    }
+  ],
+  "success_metrics": [
+    "Customer satisfaction score (target: 85%)",
+    "Average handle time (target: 8 minutes)",
+    "First call resolution rate (target: 80%)",
+    "Call abandonment rate (target: <5%)"
+  ],
+  "risks_mitigations": [
+    {
+      "risk": "System integration delays",
+      "impact": "High",
+      "probability": "Medium",
+      "mitigation_plan": "Engage IT early, use phased approach with interim manual solutions",
+      "contingency_plan": "Prepare manual workaround processes",
+      "responsible_party": "IT Manager"
+    },
+    {
+      "risk": "Agent resistance to new processes",
+      "impact": "Medium",
+      "probability": "Medium",
+      "mitigation_plan": "Early agent involvement in design, comprehensive training",
+      "contingency_plan": "Identify champions to support peers",
+      "responsible_party": "Training Manager"
+    }
+  ]
+}`
+  },
   'analysis-findings': {
     inputs: [
       { name: 'questions', type: 'string[]', required: true, description: 'Questions to answer based on the analysis' },
@@ -441,6 +640,10 @@ export default function FunctionSettingsPanel({ selectedFunction, onClose }: Fun
         return <PatternsAnalysisConfig function={selectedFunction} />;
       case 'analysis-findings':
         return <FindingsAnalysisConfig function={selectedFunction} />;
+      case 'analysis-recommendations':
+        return <RecommendationsConfig function={selectedFunction} />;
+      case 'analysis-plan':
+        return <ActionPlanConfig function={selectedFunction} />;
       default:
         return <DefaultFunctionConfig function={selectedFunction} />;
     }
@@ -1197,6 +1400,346 @@ function FindingsAnalysisConfig({ function: func }: { function: FunctionItem }) 
         {result && !error && (
           <div className="mt-4 space-y-2">
             <h3 className="font-medium text-sm">Result Summary:</h3>
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-md text-sm max-h-[300px] overflow-y-auto">
+              <pre className="whitespace-pre-wrap break-words">
+                {JSON.stringify(result, null, 2)}
+              </pre>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// RecommendationsConfig component for the Recommendations function
+function RecommendationsConfig({ function: func }: { function: FunctionItem }) {
+  const [focusArea, setFocusArea] = useState('customer retention');
+  const [inputType, setInputType] = useState<'json'>('json');
+  const [inputData, setInputData] = useState('{\n  "trends": [\n    {"focus_area": "customer satisfaction", "trend": "Declining satisfaction scores"},\n    {"focus_area": "response time", "trend": "Increasing average resolution time"}\n  ],\n  "findings": [\n    {"question": "What are the main pain points?", "answer": "Long wait times and complex processes"}\n  ]\n}');
+  const [usePrioritization, setUsePrioritization] = useState(true);
+  const [criteria, setCriteria] = useState('{\n  "impact": 0.6,\n  "implementation_ease": 0.4\n}');
+  const [isExecuting, setIsExecuting] = useState(false);
+  const [result, setResult] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
+  
+  // Handle execution of recommendations generation
+  const executeRecommendations = async () => {
+    try {
+      setIsExecuting(true);
+      setError(null);
+      
+      // Parse input data
+      let data: any;
+      try {
+        data = JSON.parse(inputData);
+      } catch (e) {
+        setError('Invalid JSON input data');
+        setIsExecuting(false);
+        return;
+      }
+      
+      // Prepare parameters
+      const parameters: Record<string, any> = {
+        focus_area: focusArea
+      };
+      
+      // Add prioritization criteria if enabled
+      if (usePrioritization) {
+        try {
+          parameters.criteria = JSON.parse(criteria);
+        } catch (e) {
+          setError('Invalid JSON criteria');
+          setIsExecuting(false);
+          return;
+        }
+      }
+      
+      // Execute the function
+      try {
+        const result = await handleExecuteFunction(func, {
+          parameters,
+          inputData: data
+        });
+        
+        setResult(result);
+      } catch (e: unknown) {
+        const errorMessage = e instanceof Error ? e.message : 'Error generating recommendations';
+        setError(`Error: ${errorMessage}`);
+      }
+    } finally {
+      setIsExecuting(false);
+    }
+  };
+  
+  return (
+    <div className="space-y-6">
+      <div className="space-y-2">
+        <h3 className="font-medium">Recommendations Configuration</h3>
+        <p className="text-sm text-muted-foreground">
+          Generate actionable recommendations based on analysis results.
+        </p>
+      </div>
+      
+      <div className="space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor="focus-area">Focus Area</Label>
+          <Input 
+            id="focus-area" 
+            placeholder="customer retention" 
+            value={focusArea}
+            onChange={(e) => setFocusArea(e.target.value)}
+          />
+          <p className="text-xs text-muted-foreground">
+            The area to focus recommendations on (e.g., customer retention, agent performance)
+          </p>
+        </div>
+        
+        <div className="space-y-2">
+          <Label htmlFor="input-data-recommendations">Analysis Data (JSON)</Label>
+          <Textarea 
+            id="input-data-recommendations"
+            placeholder="{ ... }"
+            value={inputData}
+            onChange={(e) => setInputData(e.target.value)}
+            className="min-h-[150px] font-mono text-sm"
+          />
+          <p className="text-xs text-muted-foreground">
+            Analysis results to base recommendations on (JSON format)
+          </p>
+        </div>
+        
+        <div className="flex items-center space-x-2">
+          <Switch 
+            id="use-prioritization" 
+            checked={usePrioritization}
+            onCheckedChange={setUsePrioritization}
+          />
+          <Label htmlFor="use-prioritization">Prioritize recommendations with criteria</Label>
+        </div>
+        
+        {usePrioritization && (
+          <div className="space-y-2">
+            <Label htmlFor="criteria">Prioritization Criteria (JSON)</Label>
+            <Textarea 
+              id="criteria"
+              placeholder="{ 'impact': 0.6, 'implementation_ease': 0.4 }"
+              value={criteria}
+              onChange={(e) => setCriteria(e.target.value)}
+              className="min-h-[100px] font-mono text-sm"
+            />
+            <p className="text-xs text-muted-foreground">
+              Criteria and weights for prioritization (must sum to 1.0)
+            </p>
+          </div>
+        )}
+      </div>
+      
+      <div className="pt-4 border-t">
+        <Button 
+          className="w-full" 
+          onClick={executeRecommendations}
+          disabled={isExecuting}
+        >
+          {isExecuting ? 'Generating...' : 'Generate Recommendations'}
+        </Button>
+        
+        {error && (
+          <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-md text-red-600 text-sm">
+            {error}
+          </div>
+        )}
+        
+        {result && !error && (
+          <div className="mt-4 space-y-2">
+            <h3 className="font-medium text-sm">Recommendations:</h3>
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-md text-sm max-h-[300px] overflow-y-auto">
+              <pre className="whitespace-pre-wrap break-words">
+                {JSON.stringify(result, null, 2)}
+              </pre>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ActionPlanConfig component for the Action Plan function
+function ActionPlanConfig({ function: func }: { function: FunctionItem }) {
+  const [planMode, setPlanMode] = useState<'full_plan' | 'timeline'>('full_plan');
+  const [inputType, setInputType] = useState<'json'>('json');
+  const [inputData, setInputData] = useState('{\n  "recommendations": {\n    "immediate_actions": [\n      {\n        "action": "Implement callback option",\n        "rationale": "Reduces customer frustration",\n        "expected_impact": "15% reduction in abandonment",\n        "priority": 5\n      }\n    ],\n    "implementation_notes": ["Begin with highest priority items"],\n    "success_metrics": ["Customer satisfaction scores"]\n  }\n}');
+  const [constraints, setConstraints] = useState('{\n  "budget": 50000,\n  "timeline": "6 months",\n  "resources": ["customer_support", "engineering", "marketing"]\n}');
+  const [resourceData, setResourceData] = useState('{\n  "staff": 5,\n  "start_date": "2023-10-01"\n}');
+  const [isExecuting, setIsExecuting] = useState(false);
+  const [result, setResult] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
+  
+  // Handle execution of action plan generation
+  const executeActionPlan = async () => {
+    try {
+      setIsExecuting(true);
+      setError(null);
+      
+      // Parse input data
+      let data: any;
+      try {
+        data = JSON.parse(inputData);
+      } catch (e) {
+        setError('Invalid JSON input data');
+        setIsExecuting(false);
+        return;
+      }
+      
+      // Prepare parameters
+      const parameters: Record<string, any> = {};
+      
+      // Set up parameters based on plan mode
+      if (planMode === 'timeline') {
+        parameters.generate_timeline = true;
+        
+        // For timeline mode, we need the action plan and resources
+        try {
+          const resources = JSON.parse(resourceData);
+          data = {
+            action_plan: data.action_plan || data, // Support both formats
+            resources: resources
+          };
+        } catch (e) {
+          setError('Invalid JSON resource data');
+          setIsExecuting(false);
+          return;
+        }
+      } else {
+        // For full plan mode, add constraints
+        try {
+          parameters.constraints = JSON.parse(constraints);
+        } catch (e) {
+          setError('Invalid JSON constraints');
+          setIsExecuting(false);
+          return;
+        }
+      }
+      
+      // Execute the function
+      try {
+        const result = await handleExecuteFunction(func, {
+          parameters,
+          inputData: data
+        });
+        
+        setResult(result);
+      } catch (e: unknown) {
+        const errorMessage = e instanceof Error ? e.message : 'Error generating action plan';
+        setError(`Error: ${errorMessage}`);
+      }
+    } finally {
+      setIsExecuting(false);
+    }
+  };
+  
+  return (
+    <div className="space-y-6">
+      <div className="space-y-2">
+        <h3 className="font-medium">Action Plan Configuration</h3>
+        <p className="text-sm text-muted-foreground">
+          Create implementation plans and timelines from recommendations.
+        </p>
+      </div>
+      
+      <div className="space-y-4">
+        <div className="space-y-2">
+          <Label>Plan Type</Label>
+          <div className="flex space-x-2">
+            <Button 
+              variant={planMode === 'full_plan' ? 'default' : 'outline'} 
+              size="sm"
+              onClick={() => setPlanMode('full_plan')}
+              className="flex-1"
+            >
+              Full Action Plan
+            </Button>
+            <Button 
+              variant={planMode === 'timeline' ? 'default' : 'outline'} 
+              size="sm"
+              onClick={() => setPlanMode('timeline')}
+              className="flex-1"
+            >
+              Timeline Only
+            </Button>
+          </div>
+        </div>
+        
+        <div className="space-y-2">
+          <Label htmlFor="input-data-plan">
+            {planMode === 'timeline' ? 'Action Plan Data (JSON)' : 'Recommendations Data (JSON)'}
+          </Label>
+          <Textarea 
+            id="input-data-plan"
+            placeholder="{ ... }"
+            value={inputData}
+            onChange={(e) => setInputData(e.target.value)}
+            className="min-h-[150px] font-mono text-sm"
+          />
+          <p className="text-xs text-muted-foreground">
+            {planMode === 'timeline' 
+              ? 'Action plan to generate a timeline for' 
+              : 'Recommendations to base the action plan on'}
+          </p>
+        </div>
+        
+        {planMode === 'full_plan' ? (
+          <div className="space-y-2">
+            <Label htmlFor="constraints">Constraints (JSON)</Label>
+            <Textarea 
+              id="constraints"
+              placeholder="{ 'budget': 50000, 'timeline': '6 months' }"
+              value={constraints}
+              onChange={(e) => setConstraints(e.target.value)}
+              className="min-h-[100px] font-mono text-sm"
+            />
+            <p className="text-xs text-muted-foreground">
+              Constraints for the plan implementation
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <Label htmlFor="resources">Resources (JSON)</Label>
+            <Textarea 
+              id="resources"
+              placeholder="{ 'staff': 5, 'start_date': '2023-10-01' }"
+              value={resourceData}
+              onChange={(e) => setResourceData(e.target.value)}
+              className="min-h-[100px] font-mono text-sm"
+            />
+            <p className="text-xs text-muted-foreground">
+              Resources available for timeline generation
+            </p>
+          </div>
+        )}
+      </div>
+      
+      <div className="pt-4 border-t">
+        <Button 
+          className="w-full" 
+          onClick={executeActionPlan}
+          disabled={isExecuting}
+        >
+          {isExecuting ? 'Generating...' : planMode === 'timeline' ? 'Generate Timeline' : 'Create Action Plan'}
+        </Button>
+        
+        {error && (
+          <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-md text-red-600 text-sm">
+            {error}
+          </div>
+        )}
+        
+        {result && !error && (
+          <div className="mt-4 space-y-2">
+            <h3 className="font-medium text-sm">
+              {planMode === 'timeline' ? 'Timeline:' : 'Action Plan:'}
+            </h3>
             <div className="p-3 bg-slate-50 border border-slate-200 rounded-md text-sm max-h-[300px] overflow-y-auto">
               <pre className="whitespace-pre-wrap break-words">
                 {JSON.stringify(result, null, 2)}
