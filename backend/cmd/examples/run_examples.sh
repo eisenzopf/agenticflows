@@ -15,6 +15,7 @@ DEBUG=false
 LIMIT=10
 RUN_ALL=false
 USE_MOCK=false
+SELECTED_SCRIPT=""
 
 # Function to display script usage
 function show_usage {
@@ -34,7 +35,13 @@ function show_usage {
     echo ""
     echo "Available scripts:"
     echo "  generate_intents        Generate conversation intents"
+    echo "  generate_attributes     Generate attribute values"
+    echo "  group_intents           Group similar intents"
+    echo "  identify_attributes     Identify attribute definitions"
+    echo "  match_intents           Match conversations against intents"
+    echo "  generate_recommendations Generate recommendations"
     echo "  create_action_plan      Create action plan (doesn't need database)"
+    echo "  analyze_fee_disputes    Analyze fee dispute conversations"
     echo ""
     echo "When using -m (mock) flag, only scripts that support mock data will run."
     echo ""
@@ -80,12 +87,23 @@ while [[ $# -gt 0 ]]; do
             show_usage
             exit 0
             ;;
+        generate_intents|generate_attributes|group_intents|identify_attributes|match_intents|generate_recommendations|create_action_plan|analyze_fee_disputes)
+            SELECTED_SCRIPT="$1"
+            shift
+            ;;
         *)
             echo "Unknown argument: $1"
+            show_usage
             exit 1
             ;;
     esac
 done
+
+# Convert DB_PATH to absolute path if it's not already
+if [ -n "$DB_PATH" ] && [ "${DB_PATH:0:1}" != "/" ]; then
+    DB_PATH="$(cd "$(dirname "$DB_PATH")"; pwd)/$(basename "$DB_PATH")"
+    echo -e "Using absolute database path: $DB_PATH"
+fi
 
 # Validate database path if not using mock data
 if [ "$USE_MOCK" = false ] && [ -z "$DB_PATH" ]; then
@@ -163,6 +181,7 @@ run_script() {
         
         # Run command with appropriate flags
         run_cmd="go run main.go $db_flag --workflow \"$WORKFLOW_ID\" $DEBUG_FLAG $MOCK_FLAG $extra_flags"
+        echo "Running: $run_cmd"
         eval $run_cmd
         
         if [ $? -eq 0 ]; then
@@ -181,36 +200,48 @@ echo -e "Running example scripts..."
 
 # When using mock data, only run scripts that support it
 if [ "$USE_MOCK" = true ]; then
-    # Generate Intents (supports mock data)
-    run_script "generate_intents" "Generate Intents"
+    if [ "$SELECTED_SCRIPT" = "generate_intents" ] || [ "$RUN_ALL" = true ]; then
+        # Generate Intents (supports mock data)
+        run_script "generate_intents" "Generate Intents"
+    fi
     
-    # Create Action Plan (already uses sample data)
-    run_script "create_action_plan" "Create Action Plan"
+    if [ "$SELECTED_SCRIPT" = "create_action_plan" ] || [ "$RUN_ALL" = true ]; then
+        # Create Action Plan (already uses sample data)
+        run_script "create_action_plan" "Create Action Plan"
+    fi
 else
-    # Run all scripts when using a real database
-    # Generate Intents
-    run_script "generate_intents" "Generate Intents"
+    # Run selected script or all scripts when using a real database
+    if [ "$SELECTED_SCRIPT" = "generate_intents" ] || [ "$RUN_ALL" = true ]; then
+        run_script "generate_intents" "Generate Intents"
+    fi
 
-    # Generate Attributes
-    run_script "generate_attributes" "Generate Attributes"
+    if [ "$SELECTED_SCRIPT" = "generate_attributes" ] || [ "$RUN_ALL" = true ]; then
+        run_script "generate_attributes" "Generate Attributes"
+    fi
 
-    # Group Intents
-    run_script "group_intents" "Group Intents"
+    if [ "$SELECTED_SCRIPT" = "group_intents" ] || [ "$RUN_ALL" = true ]; then
+        run_script "group_intents" "Group Intents"
+    fi
 
-    # Identify Attributes
-    run_script "identify_attributes" "Identify Attributes"
+    if [ "$SELECTED_SCRIPT" = "identify_attributes" ] || [ "$RUN_ALL" = true ]; then
+        run_script "identify_attributes" "Identify Attributes"
+    fi
 
-    # Match Intents
-    run_script "match_intents" "Match Intents"
+    if [ "$SELECTED_SCRIPT" = "match_intents" ] || [ "$RUN_ALL" = true ]; then
+        run_script "match_intents" "Match Intents"
+    fi
 
-    # Generate Recommendations
-    run_script "generate_recommendations" "Generate Recommendations"
+    if [ "$SELECTED_SCRIPT" = "generate_recommendations" ] || [ "$RUN_ALL" = true ]; then
+        run_script "generate_recommendations" "Generate Recommendations"
+    fi
 
-    # Create Action Plan
-    run_script "create_action_plan" "Create Action Plan"
+    if [ "$SELECTED_SCRIPT" = "create_action_plan" ] || [ "$RUN_ALL" = true ]; then
+        run_script "create_action_plan" "Create Action Plan"
+    fi
 
-    # Analyze Fee Disputes
-    run_script "analyze_fee_disputes" "Analyze Fee Disputes"
+    if [ "$SELECTED_SCRIPT" = "analyze_fee_disputes" ] || [ "$RUN_ALL" = true ]; then
+        run_script "analyze_fee_disputes" "Analyze Fee Disputes"
+    fi
 fi
 
 echo -e "\nAll tasks completed." 

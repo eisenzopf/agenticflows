@@ -17,16 +17,48 @@ export interface ComponentItem {
   label: string;
 }
 
-export interface FunctionItem {
+// Define types for workflow execution
+interface WorkflowNode {
   id: string;
-  type: string;
-  label: string;
-  endpoint: string;
-  description: string;
-  analysisType?: string;
+  data: {
+    nodeType?: string;
+    functionId?: string;
+    [key: string]: any;
+  };
 }
 
-const API_URL = 'http://localhost:8080/api';
+interface WorkflowEdge {
+  id: string;
+  source: string;
+  target: string;
+  data?: {
+    mappings?: Array<{
+      sourceOutput: string;
+      targetInput: string;
+    }>;
+    [key: string]: any;
+  };
+}
+
+const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080') + '/api';
+
+export interface FunctionItem {
+  id: string;
+  label: string;
+  type: string;
+  description: string;
+  endpoint?: string;
+  analysisType?: string;
+  inputs?: Array<{
+    name: string;
+    description: string;
+    required?: boolean;
+  }>;
+  outputs?: Array<{
+    name: string;
+    description: string;
+  }>;
+}
 
 export const api = {
   // Get all components (agents and tools)
@@ -316,4 +348,156 @@ export const api = {
       throw error;
     }
   },
-}; 
+
+  // Execute a workflow of connected functions
+  executeWorkflow: async (workflowId: string, initialData: Record<string, any>): Promise<any> => {
+    try {
+      // Get the workflow definition
+      const workflow = await api.getWorkflow(workflowId);
+      
+      if (!workflow || !workflow.nodes || !workflow.edges) {
+        throw new Error('Invalid workflow');
+      }
+      
+      // Parse nodes and edges if they're strings
+      const nodes: WorkflowNode[] = Array.isArray(workflow.nodes) 
+        ? workflow.nodes 
+        : (typeof workflow.nodes === 'string' ? JSON.parse(workflow.nodes) : []);
+        
+      const edges: WorkflowEdge[] = Array.isArray(workflow.edges) 
+        ? workflow.edges 
+        : (typeof workflow.edges === 'string' ? JSON.parse(workflow.edges) : []);
+      
+      // Find all function nodes
+      const functionNodes = nodes.filter(node => node.data?.nodeType === 'function');
+      
+      // Sort nodes into a dependency order for execution
+      const sortedNodes = getExecutionOrder(functionNodes, edges);
+      
+      // Initialize results storage
+      let results: Record<string, any> = { ...initialData };
+      
+      // Execute each node in order
+      for (const node of sortedNodes) {
+        const functionId = node.data?.functionId;
+        const functionType = functionId?.split('-')[1] || '';
+        
+        // Get the incoming edges for this node
+        const incomingEdges = edges.filter(edge => edge.target === node.id);
+        
+        // Prepare function parameters from edge mappings
+        const parameters: Record<string, any> = {};
+        let inputData: Record<string, any> = {};
+        
+        // Process each incoming edge to get inputs
+        for (const edge of incomingEdges) {
+          const mappings = edge.data?.mappings || [];
+          const sourceNodeId = edge.source;
+          
+          // Get results from the source node
+          const sourceResults = results[sourceNodeId];
+          
+          if (sourceResults) {
+            // Apply the mappings
+            for (const mapping of mappings) {
+              if (mapping && sourceResults[mapping.sourceOutput]) {
+                inputData[mapping.targetInput] = sourceResults[mapping.sourceOutput];
+              }
+            }
+          }
+        }
+        
+        // Merge with initial data if needed
+        inputData = { ...inputData, ...initialData };
+        
+        // Execute the function based on its type
+        let functionResult;
+        try {
+          functionResult = await api.performAnalysis(
+            functionType,
+            parameters,
+            inputData,
+            inputData.text,
+            workflowId
+          );
+          
+          // Store the results indexed by node id
+          results[node.id] = functionResult.results || {};
+        } catch (error) {
+          console.error(`Error executing function node ${node.id}:`, error);
+          results[node.id] = { error: `Failed to execute: ${error}` };
+        }
+      }
+      
+      return {
+        workflow_id: workflowId,
+        results
+      };
+    } catch (error) {
+      console.error('Error executing workflow:', error);
+      throw error;
+    }
+  },
+};
+
+// Helper function to determine execution order of nodes based on dependencies
+function getExecutionOrder(nodes: WorkflowNode[], edges: WorkflowEdge[]): WorkflowNode[] {
+  // Create a map of node dependencies
+  const dependencies: Record<string, string[]> = {};
+  const nodeMap: Record<string, WorkflowNode> = {};
+  
+  // Initialize with empty dependencies
+  nodes.forEach(node => {
+    dependencies[node.id] = [];
+    nodeMap[node.id] = node;
+  });
+  
+  // Add dependencies based on edges
+  edges.forEach(edge => {
+    if (dependencies[edge.target]) {
+      dependencies[edge.target].push(edge.source);
+    }
+  });
+  
+  // Topological sort
+  const visited: Record<string, boolean> = {};
+  const temp: Record<string, boolean> = {}; // For cycle detection
+  const result: WorkflowNode[] = [];
+  
+  // DFS function for topological sort
+  function dfs(nodeId: string) {
+    // Skip if already visited
+    if (visited[nodeId]) return;
+    
+    // Check for cycles
+    if (temp[nodeId]) {
+      throw new Error('Workflow contains cycles, which are not supported');
+    }
+    
+    // Mark as temporarily visited
+    temp[nodeId] = true;
+    
+    // Visit all dependencies first
+    for (const dep of dependencies[nodeId]) {
+      dfs(dep);
+    }
+    
+    // Mark as visited
+    visited[nodeId] = true;
+    temp[nodeId] = false;
+    
+    // Add to result
+    if (nodeMap[nodeId]) {
+      result.push(nodeMap[nodeId]);
+    }
+  }
+  
+  // Start DFS from all nodes
+  for (const nodeId of Object.keys(dependencies)) {
+    if (!visited[nodeId]) {
+      dfs(nodeId);
+    }
+  }
+  
+  return result;
+} 

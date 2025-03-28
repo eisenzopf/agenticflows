@@ -14,11 +14,31 @@ import ReactFlow, {
   ConnectionLineType,
   Position,
   NodeMouseHandler,
+  EdgeMouseHandler
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import ComponentsPanel from './ComponentsPanel';
 import FunctionSettingsPanel from './FunctionSettingsPanel';
+import EdgeSettingsPanel from './EdgeSettingsPanel';
+import WorkflowInputForm from './WorkflowInputForm';
+import WorkflowResultsViewer from './WorkflowResultsViewer';
 import { api, FunctionItem } from '@/services/api';
+import { Button } from '@/components/ui/button';
+
+// Data flow interface for function connections
+interface DataFlowMapping {
+  sourceOutput: string;
+  targetInput: string;
+}
+
+// Custom edge data for function connections
+interface FunctionEdgeData {
+  label?: string;
+  mappings: DataFlowMapping[];
+}
+
+// Define a custom Edge with our data type
+type CustomEdge = Edge<FunctionEdgeData>;
 
 // Start with an empty canvas
 const initialNodes: Node[] = [];
@@ -76,6 +96,7 @@ const getNodeStyle = (type: string) => {
 export interface FlowEditorHandle {
   handleSaveWorkflow: () => Promise<{success: boolean, workflowName: string}>;
   loadWorkflow: (workflowId: string) => Promise<boolean>;
+  executeWorkflow: (initialData?: Record<string, any>) => Promise<any>;
 }
 
 interface SavedWorkflowData {
@@ -88,9 +109,20 @@ interface SavedWorkflowData {
   };
 }
 
+// Remove the inline EdgeSettingsPanel component definition since we're importing it
+// const EdgeSettingsPanel = ({ edge, sourceFunction, targetFunction, onClose, updateMappings }: {
+//   edge: CustomEdge;
+//   sourceFunction: FunctionItem;
+//   targetFunction: FunctionItem;
+//   onClose: () => void;
+//   updateMappings: (edgeId: string, mappings: DataFlowMapping[]) => void;
+// }) => {
+//   return <div>Edge Settings Panel Placeholder</div>;
+// };
+
 const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<FunctionEdgeData>(initialEdges);
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [activeWorkflowId, setActiveWorkflowId] = useState<string | null>(null);
@@ -98,6 +130,13 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [selectedFunction, setSelectedFunction] = useState<FunctionItem | null>(null);
   const [functionComponents, setFunctionComponents] = useState<FunctionItem[]>([]);
+  const [selectedEdge, setSelectedEdge] = useState<CustomEdge | null>(null);
+  const [sourceFunctionItem, setSourceFunctionItem] = useState<FunctionItem | null>(null);
+  const [targetFunctionItem, setTargetFunctionItem] = useState<FunctionItem | null>(null);
+  const [executionResults, setExecutionResults] = useState<Record<string, any> | null>(null);
+  const [isExecuting, setIsExecuting] = useState(false);
+  const [showInputForm, setShowInputForm] = useState(false);
+  const [showResultsViewer, setShowResultsViewer] = useState(false);
 
   // Fetch function components when component mounts
   useEffect(() => {
@@ -246,6 +285,9 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
   const onPaneClick = useCallback(() => {
     setSelectedNode(null);
     setSelectedFunction(null);
+    setSelectedEdge(null);
+    setSourceFunctionItem(null);
+    setTargetFunctionItem(null);
   }, []);
 
   // Close the function settings panel
@@ -356,24 +398,177 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
     }
   }, [reactFlowInstance, ensureHorizontalOrientation, activeWorkflowId]);
 
+  // Execute the current workflow
+  const executeWorkflow = useCallback(async (initialData: Record<string, any> = {}) => {
+    if (!activeWorkflowId) {
+      alert('Please save the workflow first before executing.');
+      return null;
+    }
+    
+    setIsExecuting(true);
+    setExecutionResults(null);
+    
+    try {
+      // Save the workflow first
+      await handleSaveWorkflow();
+      
+      // Execute the workflow
+      const results = await api.executeWorkflow(activeWorkflowId, initialData);
+      
+      // Update state with results
+      setExecutionResults(results);
+      setShowResultsViewer(true);
+      
+      // Apply visual indicators for successful nodes
+      const updatedNodes = nodes.map(node => {
+        if (results.results[node.id]) {
+          // Node was executed successfully
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              executionResult: results.results[node.id]
+            },
+            style: {
+              ...node.style,
+              boxShadow: '0 0 0 2px green'
+            }
+          };
+        } else if (node.data?.nodeType === 'function') {
+          // Function node but not executed
+          return {
+            ...node,
+            style: {
+              ...node.style,
+              boxShadow: '0 0 0 2px gray'
+            }
+          };
+        }
+        return node;
+      });
+      
+      setNodes(updatedNodes);
+      return results;
+    } catch (error) {
+      console.error('Error executing workflow:', error);
+      alert(`Error executing workflow: ${error}`);
+      return null;
+    } finally {
+      setIsExecuting(false);
+    }
+  }, [activeWorkflowId, handleSaveWorkflow, nodes, setNodes]);
+
   // Expose methods to the parent component
   useImperativeHandle(ref, () => ({
     handleSaveWorkflow,
-    loadWorkflow
+    loadWorkflow,
+    executeWorkflow
   }));
 
   // Memoize React Flow props to prevent recreating objects on each render
   const onConnect = useCallback(
     (connection: Connection) => {
-      setEdges((eds) => addEdge({
-        ...connection,
-        type: 'smoothstep',
-        animated: true,
-        style: { stroke: '#64748B' }
-      }, eds));
+      // Get source and target nodes to determine function types
+      const sourceNode = nodes.find(node => node.id === connection.source);
+      const targetNode = nodes.find(node => node.id === connection.target);
+      
+      if (sourceNode && targetNode && 
+          sourceNode.data?.nodeType === 'function' && 
+          targetNode.data?.nodeType === 'function') {
+        
+        // Find source and target function items
+        const sourceFuncId = sourceNode.data?.functionId;
+        const targetFuncId = targetNode.data?.functionId;
+        
+        const sourceFunctionItem = functionComponents.find(f => f.id === sourceFuncId);
+        const targetFunctionItem = functionComponents.find(f => f.id === targetFuncId);
+        
+        const newEdge = {
+          ...connection,
+          id: `edge-${Date.now()}`,
+          type: 'smoothstep',
+          animated: true,
+          style: { stroke: '#64748B' },
+          data: {
+            label: 'Configure data flow',
+            mappings: [] as DataFlowMapping[]
+          }
+        } as CustomEdge;
+        
+        // Add the edge
+        setEdges((eds) => addEdge(newEdge, eds));
+        
+        // If we have function information, select the edge for configuration
+        if (sourceFunctionItem && targetFunctionItem) {
+          setSelectedEdge(newEdge);
+          setSourceFunctionItem(sourceFunctionItem);
+          setTargetFunctionItem(targetFunctionItem);
+        }
+      } else {
+        // Regular connection for non-function nodes
+        setEdges((eds) => addEdge({
+          ...connection,
+          type: 'smoothstep',
+          animated: true,
+          style: { stroke: '#64748B' }
+        }, eds));
+      }
     },
-    [setEdges]
+    [nodes, setEdges, functionComponents]
   );
+
+  // Handle edge click to show edge settings panel
+  const onEdgeClick: EdgeMouseHandler = useCallback((event, edge) => {
+    // Find source and target nodes
+    const sourceNode = nodes.find(node => node.id === edge.source);
+    const targetNode = nodes.find(node => node.id === edge.target);
+    
+    if (sourceNode && targetNode && 
+        sourceNode.data?.nodeType === 'function' && 
+        targetNode.data?.nodeType === 'function') {
+      
+      // Find source and target function items
+      const sourceFuncId = sourceNode.data?.functionId;
+      const targetFuncId = targetNode.data?.functionId;
+      
+      const sourceFunctionItem = functionComponents.find(f => f.id === sourceFuncId);
+      const targetFunctionItem = functionComponents.find(f => f.id === targetFuncId);
+      
+      if (sourceFunctionItem && targetFunctionItem) {
+        setSelectedEdge(edge as CustomEdge);
+        setSourceFunctionItem(sourceFunctionItem);
+        setTargetFunctionItem(targetFunctionItem);
+        // Deselect any selected node
+        setSelectedNode(null);
+        setSelectedFunction(null);
+      }
+    }
+  }, [nodes, functionComponents]);
+
+  // Close the edge settings panel
+  const closeEdgeSettings = useCallback(() => {
+    setSelectedEdge(null);
+    setSourceFunctionItem(null);
+    setTargetFunctionItem(null);
+  }, []);
+
+  // Update edge data mappings
+  const updateEdgeDataMappings = useCallback((edgeId: string, mappings: DataFlowMapping[]) => {
+    setEdges(eds => 
+      eds.map(edge => {
+        if (edge.id === edgeId) {
+          return {
+            ...edge,
+            data: {
+              ...edge.data,
+              mappings
+            }
+          };
+        }
+        return edge;
+      })
+    );
+  }, [setEdges]);
 
   const onDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -442,6 +637,17 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
   // Memoize defaultViewport to prevent recreation on each render
   const defaultViewport = useMemo(() => ({ x: 0, y: 0, zoom: 0.8 }), []);
 
+  // Show input form when executing workflow
+  const handleExecuteClick = useCallback(() => {
+    setShowInputForm(true);
+  }, []);
+  
+  // Handle workflow input form submission
+  const handleWorkflowInputSubmit = useCallback((inputData: Record<string, any>) => {
+    setShowInputForm(false);
+    executeWorkflow(inputData);
+  }, [executeWorkflow]);
+
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
       <ComponentsPanel 
@@ -449,6 +655,74 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
         onLoadWorkflow={loadWorkflow}
         activeWorkflowId={activeWorkflowId}
       />
+      
+      {/* Add workflow execution button */}
+      {activeWorkflowId && (
+        <div 
+          style={{ 
+            position: 'absolute', 
+            top: '16px', 
+            right: (selectedFunction || selectedEdge) ? '528px' : '16px',
+            zIndex: 5,
+            transition: 'right 0.3s ease-in-out'
+          }}
+        >
+          <Button
+            onClick={handleExecuteClick}
+            disabled={isExecuting}
+            className="bg-green-600 hover:bg-green-700 text-white"
+          >
+            {isExecuting ? 'Executing...' : 'Execute Workflow'}
+          </Button>
+        </div>
+      )}
+      
+      {/* Workflow input form modal */}
+      {showInputForm && (
+        <div 
+          style={{ 
+            position: 'fixed', 
+            top: 0, 
+            left: 0, 
+            right: 0, 
+            bottom: 0, 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center', 
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            zIndex: 20
+          }}
+        >
+          <WorkflowInputForm 
+            onSubmit={handleWorkflowInputSubmit} 
+            onClose={() => setShowInputForm(false)} 
+          />
+        </div>
+      )}
+      
+      {/* Workflow results viewer */}
+      {showResultsViewer && executionResults && (
+        <div 
+          style={{ 
+            position: 'fixed', 
+            top: 0, 
+            left: 0, 
+            right: 0, 
+            bottom: 0, 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center', 
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            zIndex: 20
+          }}
+        >
+          <WorkflowResultsViewer 
+            results={executionResults} 
+            onClose={() => setShowResultsViewer(false)} 
+          />
+        </div>
+      )}
+      
       <div 
         className="reactflow-wrapper" 
         ref={reactFlowWrapper} 
@@ -456,7 +730,7 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
           width: '100%', 
           height: '100%', 
           marginLeft: '64px', 
-          marginRight: selectedFunction ? '512px' : '0', 
+          marginRight: (selectedFunction || selectedEdge) ? '512px' : '0', 
           transition: 'margin-right 0.3s ease-in-out'
         }}
       >
@@ -470,6 +744,7 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
           onDrop={onDrop}
           onDragOver={onDragOver}
           onNodeClick={onNodeClick}
+          onEdgeClick={onEdgeClick}
           onPaneClick={onPaneClick}
           defaultViewport={defaultViewport}
           minZoom={0.5}
@@ -504,6 +779,28 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
           <FunctionSettingsPanel 
             selectedFunction={selectedFunction} 
             onClose={closeFunctionSettings} 
+          />
+        </div>
+      )}
+
+      {selectedEdge && sourceFunctionItem && targetFunctionItem && (
+        <div 
+          style={{ 
+            position: 'absolute', 
+            top: 0, 
+            right: 0, 
+            height: '100%', 
+            width: '512px',
+            zIndex: 10,
+            boxShadow: '-2px 0px 10px rgba(0,0,0,0.1)'
+          }}
+        >
+          <EdgeSettingsPanel 
+            edge={selectedEdge}
+            sourceFunction={sourceFunctionItem}
+            targetFunction={targetFunctionItem}
+            onClose={closeEdgeSettings}
+            updateMappings={updateEdgeDataMappings}
           />
         </div>
       )}
