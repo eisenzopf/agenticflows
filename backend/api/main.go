@@ -50,6 +50,9 @@ func main() {
 		// Chain analysis endpoint for workflows
 		http.HandleFunc("/api/analysis/chain", analysisHandler.handleChainAnalysis)
 
+		// Enable debugging for analysis requests
+		log.Println("Analysis endpoints initialized with types: trends, patterns, findings, attributes, intent, recommendations, plan")
+
 		// Legacy endpoints (kept for backward compatibility)
 		/*http.HandleFunc("/api/analysis/trends", analysisHandler.handleAnalysisTrends)
 		http.HandleFunc("/api/analysis/patterns", analysisHandler.handleAnalysisPatterns)

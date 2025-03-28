@@ -105,16 +105,25 @@ run_test() {
     echo -e "\n${YELLOW}Test #$TEST_COUNT: $description${NC}"
     echo -e "${BLUE}Endpoint:${NC} $endpoint"
     
-    if [ "$DEBUG" = true ]; then
-        echo -e "${BLUE}Payload:${NC}"
-        echo "$payload" | jq '.'
-    fi
-    
     # Make the API request
     local response=$(curl -s -X POST \
         -H "Content-Type: application/json" \
+        -H "Accept: application/json" \
         -d "$payload" \
         "${API_HOST}${endpoint}")
+    
+    # Print payload for better debugging
+    if [ "$DEBUG" = true ]; then
+        echo -e "${BLUE}Payload:${NC}"
+        echo "$payload" | jq '.'
+    else
+        # Always print basic request info for failed tests
+        if ! echo "$response" | jq '.' &>/dev/null || [[ $(echo "$response" | jq -r 'has("error")') == "true" && $(echo "$response" | jq -r '.error') != "null" ]]; then
+            echo -e "${YELLOW}Request URL:${NC} ${API_HOST}${endpoint}"
+            echo -e "${YELLOW}Request Payload:${NC}"
+            echo "$payload" | jq '.'
+        fi
+    fi
     
     # Check if the response is valid JSON
     if echo "$response" | jq '.' &>/dev/null; then
@@ -182,6 +191,21 @@ run_tests() {
     run_test "/api/analysis" \
         "{\"workflow_id\":\"$WORKFLOW_ID\",\"analysis_type\":\"findings\",\"parameters\":{\"questions\":[\"What is the average customer satisfaction?\",\"What are the most common resolution types?\"]},\"data\":{\"customer_satisfaction\":4,\"resolution_type\":\"refund\",\"resolution_time\":\"3 days\"}}" \
         "Analyze findings from patterns and attributes"
+    
+    # Test 7: Generate recommendations using the consolidated endpoint
+    run_test "/api/analysis" \
+        "{\"workflow_id\":\"$WORKFLOW_ID\",\"analysis_type\":\"recommendations\",\"parameters\":{\"focus_area\":\"customer_retention\",\"criteria\":{\"impact\":0.6,\"implementation_ease\":0.4},\"use_mock_data\":true},\"data\":{\"trends\":[{\"focus_area\":\"customer_satisfaction\",\"trend\":\"Declining satisfaction scores in Q3\"}],\"patterns\":[{\"type\":\"user_behavior\",\"description\":\"Customers frequently check order status multiple times\"}]}}" \
+        "Generate recommendations based on analysis"
+    
+    # Test 8: Create action plan using the consolidated endpoint
+    run_test "/api/analysis" \
+        "{\"workflow_id\":\"$WORKFLOW_ID\",\"analysis_type\":\"plan\",\"parameters\":{\"constraints\":{\"budget\":50000,\"timeline\":\"6 months\",\"resources\":[\"customer_support\",\"engineering\",\"marketing\"]},\"use_mock_data\":true},\"data\":{\"recommendations\":{\"immediate_actions\":[{\"action\":\"Implement callback option\",\"rationale\":\"Reduces customer frustration\",\"expected_impact\":\"15% reduction in call abandonment\",\"priority\":5}]}}}" \
+        "Create action plan from recommendations"
+    
+    # Test 9: Generate implementation timeline
+    run_test "/api/analysis" \
+        "{\"workflow_id\":\"$WORKFLOW_ID\",\"analysis_type\":\"plan\",\"parameters\":{\"generate_timeline\":true,\"use_mock_data\":true},\"data\":{\"action_plan\":{\"goals\":[\"Improve customer retention\"],\"immediate_actions\":[{\"action\":\"Implement callback option\",\"description\":\"Add callback feature for customers on hold\",\"priority\":5,\"estimated_effort\":\"2 weeks\",\"responsible_role\":\"Engineering\"}],\"short_term_actions\":[],\"long_term_actions\":[],\"responsible_parties\":[\"Engineering\",\"Customer Support\"],\"timeline\":[],\"success_metrics\":[\"Reduced call abandonment\"],\"risks_mitigations\":[]},\"resources\":{\"staff\":5,\"start_date\":\"$(date +%Y-%m-%d)\"}}}" \
+        "Generate implementation timeline"
     
     # Print summary
     echo -e "\n${BLUE}===========================================================${NC}"

@@ -60,6 +60,11 @@ func NewAnalysisHandler() (*AnalysisHandler, error) {
 		return nil, fmt.Errorf("failed to create planner: %w", err)
 	}
 
+	// Create and return the analysis handler
+	// Note: The API supports mock data mode through the "use_mock_data" parameter
+	// When this parameter is set to true in API requests to /api/analysis,
+	// predefined mock responses will be returned instead of making LLM API calls.
+	// This is useful for testing, demonstrations, and development environments.
 	return &AnalysisHandler{
 		analyzer:             analyzer,
 		textGenerator:        textGenerator,
@@ -429,11 +434,18 @@ func (h *AnalysisHandler) handleAnalysis(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Log the analysis type for debugging
+	log.Printf("Received analysis request with type: %s", req.AnalysisType)
+
+	// Convert analysis type to lowercase for case-insensitive matching
+	analysisType := strings.ToLower(req.AnalysisType)
+	log.Printf("Using normalized analysis type: %s", analysisType)
+
 	// Route to appropriate analysis function based on type
 	var resp *analysis.StandardAnalysisResponse
 	var err error
 
-	switch req.AnalysisType {
+	switch analysisType {
 	case "trends":
 		resp, err = h.handleTrendsAnalysis(r.Context(), req)
 	case "patterns":
@@ -449,6 +461,7 @@ func (h *AnalysisHandler) handleAnalysis(w http.ResponseWriter, r *http.Request)
 	case "plan":
 		resp, err = h.handlePlanAnalysis(r.Context(), req)
 	default:
+		log.Printf("Invalid analysis type: %s (original: %s)", analysisType, req.AnalysisType)
 		sendAnalysisError(w, "invalid_analysis_type", "Invalid analysis type", http.StatusBadRequest)
 		return
 	}
@@ -745,6 +758,13 @@ func (h *AnalysisHandler) handleIntentAnalysis(ctx context.Context, req analysis
 
 // handleRecommendationsAnalysis processes a recommendations analysis request
 func (h *AnalysisHandler) handleRecommendationsAnalysis(ctx context.Context, req analysis.StandardAnalysisRequest) (*analysis.StandardAnalysisResponse, error) {
+	log.Printf("Processing recommendations analysis request")
+
+	// Check if recommendationEngine is properly initialized
+	if h.recommendationEngine == nil {
+		return nil, fmt.Errorf("recommendation engine is not initialized")
+	}
+
 	// Extract parameters
 	focusArea, _ := req.Parameters["focus_area"].(string)
 	if focusArea == "" {
@@ -752,43 +772,107 @@ func (h *AnalysisHandler) handleRecommendationsAnalysis(ctx context.Context, req
 		focusArea = "improving customer experience"
 	}
 
-	// Extract prioritization criteria if provided
-	criteriaRaw, hasCriteria := req.Parameters["criteria"].(map[string]interface{})
-
-	// Convert to the format expected by the recommendation engine
-	var data map[string]interface{}
-	if req.Data != nil {
-		data = req.Data
-	} else {
-		// Create an empty data map if none provided
-		data = make(map[string]interface{})
+	// Check for prioritization criteria
+	hasCriteria := false
+	if _, ok := req.Parameters["criteria"].(map[string]interface{}); ok {
+		hasCriteria = true
 	}
 
-	// Generate recommendations
-	recs, err := h.recommendationEngine.GenerateRecommendations(ctx, data, focusArea)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate recommendations: %w", err)
+	// Check if mock data should be used
+	// 'use_mock_data' is an optional boolean parameter that, when set to true,
+	// will return predefined mock data instead of making an actual API call.
+	// This is useful for testing, demonstrations, and environments where the LLM API is unavailable.
+	useMockData := false
+	if mockParam, ok := req.Parameters["use_mock_data"].(bool); ok {
+		useMockData = mockParam
 	}
 
-	// If prioritization criteria are provided, prioritize the recommendations
-	if hasCriteria && len(recs.ImmediateActions) > 0 {
-		// Convert criteria to the expected format
-		criteria := make(map[string]float64)
-		for k, v := range criteriaRaw {
-			if fv, ok := v.(float64); ok {
-				criteria[k] = fv
-			} else if iv, ok := v.(int); ok {
-				criteria[k] = float64(iv)
-			}
+	var recs *analysis.RecommendationResponse
+
+	if useMockData {
+		// Generate recommendations - use mock data for testing
+		log.Printf("Using mock recommendations for testing (focus area: %s)", focusArea)
+		recs = &analysis.RecommendationResponse{
+			ImmediateActions: []analysis.Recommendation{
+				{
+					Action:         "Implement callback option",
+					Rationale:      "Reduces customer frustration during peak times",
+					ExpectedImpact: "15% reduction in call abandonment rate",
+					Priority:       5,
+				},
+				{
+					Action:         "Add self-service order tracking",
+					Rationale:      "Customers frequently check order status",
+					ExpectedImpact: "25% reduction in status-related calls",
+					Priority:       4,
+				},
+				{
+					Action:         "Improve post-purchase email communication",
+					Rationale:      "Customers need clearer delivery information",
+					ExpectedImpact: "10% reduction in delivery-related inquiries",
+					Priority:       3,
+				},
+			},
+			ImplementationNotes: []string{
+				"Focus on mobile-friendly interfaces",
+				"Ensure integration with existing CRM system",
+				"Provide comprehensive training for support staff",
+			},
+			SuccessMetrics: []string{
+				"Reduction in call volume for routine inquiries",
+				"Improvement in customer satisfaction scores",
+				"Increase in first-call resolution rate",
+			},
 		}
 
-		// Prioritize recommendations if we have valid criteria
-		if len(criteria) > 0 {
-			prioritizedRecs, err := h.recommendationEngine.PrioritizeRecommendations(ctx, recs.ImmediateActions, criteria)
-			if err == nil {
-				recs.ImmediateActions = prioritizedRecs
-			} else {
-				log.Printf("Warning: Failed to prioritize recommendations: %v", err)
+		// If prioritization criteria are provided, prioritize the recommendations with mock data
+		if hasCriteria && len(recs.ImmediateActions) > 0 {
+			log.Printf("Using mock prioritized recommendations for testing")
+			// We'll just pretend to reprioritize by making slight adjustments
+			recs.ImmediateActions[0].Priority = 5
+			recs.ImmediateActions[1].Priority = 4
+			recs.ImmediateActions[2].Priority = 3
+		}
+	} else {
+		// Use real API for production
+		// Convert to the format expected by the recommendation engine
+		var data map[string]interface{}
+		if req.Data != nil {
+			data = req.Data
+		} else {
+			data = make(map[string]interface{})
+		}
+
+		// Generate recommendations
+		var err error
+		recs, err = h.recommendationEngine.GenerateRecommendations(ctx, data, focusArea)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate recommendations: %w", err)
+		}
+
+		// If prioritization criteria are provided, prioritize the recommendations
+		if hasCriteria && len(recs.ImmediateActions) > 0 {
+			// Extract prioritization criteria
+			criteriaRaw, _ := req.Parameters["criteria"].(map[string]interface{})
+
+			// Convert criteria to the expected format
+			criteria := make(map[string]float64)
+			for k, v := range criteriaRaw {
+				if fv, ok := v.(float64); ok {
+					criteria[k] = fv
+				} else if iv, ok := v.(int); ok {
+					criteria[k] = float64(iv)
+				}
+			}
+
+			// Prioritize recommendations if we have valid criteria
+			if len(criteria) > 0 {
+				prioritizedRecs, prErr := h.recommendationEngine.PrioritizeRecommendations(ctx, recs.ImmediateActions, criteria)
+				if prErr == nil {
+					recs.ImmediateActions = prioritizedRecs
+				} else {
+					log.Printf("Warning: Failed to prioritize recommendations: %v", prErr)
+				}
 			}
 		}
 	}
@@ -807,37 +891,86 @@ func (h *AnalysisHandler) handleRecommendationsAnalysis(ctx context.Context, req
 
 // handlePlanAnalysis processes a plan generation request
 func (h *AnalysisHandler) handlePlanAnalysis(ctx context.Context, req analysis.StandardAnalysisRequest) (*analysis.StandardAnalysisResponse, error) {
+	log.Printf("Processing plan analysis request")
+
+	// Check if planner is properly initialized
+	if h.planner == nil {
+		return nil, fmt.Errorf("planner is not initialized")
+	}
+
 	// Check if we're generating a timeline or a full action plan
 	generateTimeline, _ := req.Parameters["generate_timeline"].(bool)
 
+	// Check if mock data should be used
+	// 'use_mock_data' is an optional boolean parameter that, when set to true,
+	// will return predefined mock data instead of making an actual API call.
+	// This is useful for testing, demonstrations, and environments where the LLM API is unavailable.
+	useMockData := false
+	if mockParam, ok := req.Parameters["use_mock_data"].(bool); ok {
+		useMockData = mockParam
+	}
+
 	if generateTimeline {
-		// Extract action plan and resources
-		actionPlanRaw, ok := req.Data["action_plan"].(map[string]interface{})
-		if !ok {
+		log.Printf("Generating timeline for action plan")
+
+		// Verify that action plan exists in the request data
+		if _, ok := req.Data["action_plan"]; !ok {
 			return nil, fmt.Errorf("action_plan is required in data field")
 		}
 
-		// Convert to ActionPlan
-		actionPlanBytes, err := json.Marshal(actionPlanRaw)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal action plan: %w", err)
-		}
+		var timeline []analysis.TimelineEvent
 
-		var actionPlan analysis.ActionPlan
-		if err := json.Unmarshal(actionPlanBytes, &actionPlan); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal action plan: %w", err)
-		}
+		if useMockData {
+			// Use mock timeline for testing
+			log.Printf("Using mock timeline for testing")
+			timeline = []analysis.TimelineEvent{
+				{
+					Phase:       "Phase 1: Initial Implementation",
+					Description: "Set up the basic infrastructure for the callback system",
+					Duration:    "2 weeks",
+					Milestones:  []string{"Backend API setup", "Database schema design", "Basic UI mockups"},
+				},
+				{
+					Phase:       "Phase 2: Development",
+					Description: "Develop the callback functionality and integrate with existing systems",
+					Duration:    "4 weeks",
+					Milestones:  []string{"Backend development", "Frontend integration", "Unit testing"},
+				},
+				{
+					Phase:       "Phase 3: Testing and Deployment",
+					Description: "Test the system and roll out to production",
+					Duration:    "2 weeks",
+					Milestones:  []string{"QA testing", "User acceptance testing", "Production deployment"},
+				},
+			}
+		} else {
+			// Use real API for production
+			// Extract action plan and resources
+			actionPlanRaw, _ := req.Data["action_plan"].(map[string]interface{})
 
-		// Extract resources
-		resources, ok := req.Data["resources"].(map[string]interface{})
-		if !ok {
-			resources = make(map[string]interface{})
-		}
+			// Convert to ActionPlan
+			actionPlanBytes, marshalErr := json.Marshal(actionPlanRaw)
+			if marshalErr != nil {
+				return nil, fmt.Errorf("failed to marshal action plan: %w", marshalErr)
+			}
 
-		// Generate timeline
-		timeline, err := h.planner.GenerateTimeline(ctx, &actionPlan, resources)
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate timeline: %w", err)
+			var actionPlan analysis.ActionPlan
+			if unmarshalErr := json.Unmarshal(actionPlanBytes, &actionPlan); unmarshalErr != nil {
+				return nil, fmt.Errorf("failed to unmarshal action plan: %w", unmarshalErr)
+			}
+
+			// Extract resources
+			resources, ok := req.Data["resources"].(map[string]interface{})
+			if !ok {
+				resources = make(map[string]interface{})
+			}
+
+			// Generate timeline
+			var timelineErr error
+			timeline, timelineErr = h.planner.GenerateTimeline(ctx, &actionPlan, resources)
+			if timelineErr != nil {
+				return nil, fmt.Errorf("failed to generate timeline: %w", timelineErr)
+			}
 		}
 
 		// Return standardized response
@@ -851,33 +984,123 @@ func (h *AnalysisHandler) handlePlanAnalysis(ctx context.Context, req analysis.S
 
 		return resp, nil
 	} else {
-		// Extract recommendations and constraints
-		recsRaw, ok := req.Data["recommendations"].(map[string]interface{})
-		if !ok {
+		// Extract recommendations
+		if _, ok := req.Data["recommendations"]; !ok {
 			return nil, fmt.Errorf("recommendations are required in data field")
 		}
 
-		// Convert to RecommendationResponse
-		recsBytes, err := json.Marshal(recsRaw)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal recommendations: %w", err)
-		}
+		var actionPlan *analysis.ActionPlan
 
-		var recommendations analysis.RecommendationResponse
-		if err := json.Unmarshal(recsBytes, &recommendations); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal recommendations: %w", err)
-		}
+		if useMockData {
+			// Use mock action plan for testing
+			log.Printf("Using mock action plan for testing")
+			actionPlan = &analysis.ActionPlan{
+				Goals: []string{
+					"Improve customer retention rates",
+					"Reduce call center wait times",
+					"Increase customer satisfaction scores",
+				},
+				ImmediateActions: []analysis.ActionItem{
+					{
+						Action:          "Implement callback option",
+						Description:     "Add callback feature for customers on hold",
+						Priority:        5,
+						EstimatedEffort: "2 weeks",
+						ResponsibleRole: "Engineering",
+					},
+					{
+						Action:          "Train agents on new retention offers",
+						Description:     "Provide comprehensive training on new retention policies",
+						Priority:        4,
+						EstimatedEffort: "1 week",
+						ResponsibleRole: "Training",
+					},
+				},
+				ShortTermActions: []analysis.ActionItem{
+					{
+						Action:          "Develop self-service order tracking",
+						Description:     "Create web and mobile interfaces for order status tracking",
+						Priority:        4,
+						EstimatedEffort: "1 month",
+						ResponsibleRole: "Engineering",
+						Dependencies:    []string{"Upgrade backend API"},
+					},
+				},
+				LongTermActions: []analysis.ActionItem{
+					{
+						Action:          "Implement AI-powered assistance",
+						Description:     "Develop AI chatbot for common inquiries",
+						Priority:        3,
+						EstimatedEffort: "3 months",
+						ResponsibleRole: "Engineering",
+					},
+				},
+				ResponsibleParties: []string{
+					"Customer Support",
+					"Engineering",
+					"Training",
+					"Marketing",
+				},
+				Timeline: []analysis.TimelineEvent{
+					{
+						Phase:       "Phase 1: Immediate Improvements",
+						Description: "Focus on quick wins with high impact",
+						Duration:    "1 month",
+						Milestones:  []string{"Callback feature launch", "Agent training complete"},
+					},
+					{
+						Phase:       "Phase 2: System Enhancements",
+						Description: "Roll out system improvements and self-service features",
+						Duration:    "2 months",
+						Milestones:  []string{"Self-service tracking launch", "Knowledge base update"},
+					},
+				},
+				SuccessMetrics: []string{
+					"15% reduction in call abandonment rate",
+					"10% increase in customer satisfaction scores",
+					"20% reduction in routine inquiry calls",
+				},
+				RisksMitigations: []analysis.RiskItem{
+					{
+						Risk:           "Technical integration issues",
+						Impact:         "High",
+						Probability:    "Medium",
+						MitigationPlan: "Comprehensive testing and phased rollout",
+					},
+					{
+						Risk:           "Agent adoption resistance",
+						Impact:         "Medium",
+						Probability:    "Low",
+						MitigationPlan: "Early involvement and feedback collection",
+					},
+				},
+			}
+		} else {
+			// Use real API for production
+			// Convert to RecommendationResponse
+			recsRaw, _ := req.Data["recommendations"].(map[string]interface{})
+			recsBytes, marshalErr := json.Marshal(recsRaw)
+			if marshalErr != nil {
+				return nil, fmt.Errorf("failed to marshal recommendations: %w", marshalErr)
+			}
 
-		// Extract constraints
-		constraints, ok := req.Parameters["constraints"].(map[string]interface{})
-		if !ok {
-			constraints = make(map[string]interface{})
-		}
+			var recommendations analysis.RecommendationResponse
+			if unmarshalErr := json.Unmarshal(recsBytes, &recommendations); unmarshalErr != nil {
+				return nil, fmt.Errorf("failed to unmarshal recommendations: %w", unmarshalErr)
+			}
 
-		// Create action plan
-		actionPlan, err := h.planner.CreateActionPlan(ctx, &recommendations, constraints)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create action plan: %w", err)
+			// Extract constraints
+			constraints, ok := req.Parameters["constraints"].(map[string]interface{})
+			if !ok {
+				constraints = make(map[string]interface{})
+			}
+
+			// Create action plan
+			var planErr error
+			actionPlan, planErr = h.planner.CreateActionPlan(ctx, &recommendations, constraints)
+			if planErr != nil {
+				return nil, fmt.Errorf("failed to create action plan: %w", planErr)
+			}
 		}
 
 		// Return standardized response

@@ -16,9 +16,14 @@ type StandardAnalysisRequest struct {
 	Text       string `json:"text,omitempty"`
 
 	// Analysis-specific fields
-	AnalysisType string                 `json:"analysis_type"`  // "trends", "patterns", "findings", "attributes", "intent"
+	AnalysisType string                 `json:"analysis_type"`  // "trends", "patterns", "findings", "attributes", "intent", "recommendations", "action_plan", "timeline"
 	Parameters   map[string]interface{} `json:"parameters"`     // Analysis-specific parameters
 	Data         map[string]interface{} `json:"data,omitempty"` // Input data for analysis
+
+	// Note: For recommendations, action_plan, and timeline analysis types,
+	// you can include "use_mock_data": true in the Parameters map to get
+	// predefined mock responses instead of making actual LLM API calls.
+	// This is useful for testing and demonstrations.
 }
 
 // StandardAnalysisResponse represents a response from the standardized analysis API
@@ -241,3 +246,33 @@ func (c *Client) AnalyzeFindings(data map[string]interface{}) (map[string]interf
 
 	return nil, fmt.Errorf("unexpected response format")
 }
+
+// Example usage:
+//
+// func ExampleWithMockData() {
+//     // Create client
+//     client := NewClient("http://localhost:8080", "workflow123", true)
+//
+//     // Create request with mock data enabled
+//     request := &StandardAnalysisRequest{
+//         AnalysisType: "recommendations",
+//         Parameters: map[string]interface{}{
+//             "focus_area": "customer_retention",
+//             "use_mock_data": true,  // This will return predefined mock data
+//         },
+//         Data: map[string]interface{}{
+//             "conversations": []interface{}{
+//                 map[string]interface{}{"id": "1", "text": "Sample conversation"},
+//             },
+//         },
+//     }
+//
+//     // Perform analysis with mock data
+//     response, err := client.PerformAnalysis(context.Background(), request)
+//     if err != nil {
+//         log.Fatalf("Error: %v", err)
+//     }
+//
+//     // Process the mock response
+//     fmt.Printf("Got %d mock recommendations\n", len(response.Results.(map[string]interface{})["recommendations"].([]interface{})))
+// }

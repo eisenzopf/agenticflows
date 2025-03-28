@@ -121,6 +121,8 @@ run_script() {
         
         # Set script-specific flags
         local extra_flags=""
+        local db_flag="--db \"$DB_PATH\""
+        
         case "$script_dir" in
             "group_intents")
                 extra_flags="--min-count 5 --max-groups 10"
@@ -128,12 +130,19 @@ run_script() {
             "analyze_fee_disputes")
                 extra_flags="--max $LIMIT --batch 10"
                 ;;
+            "generate_recommendations")
+                extra_flags="--limit $LIMIT --focus customer_retention"
+                ;;
+            "create_action_plan")
+                extra_flags="--budget 50000 --timespan \"6 months\""
+                db_flag="" # No DB needed for action plan
+                ;;
             *)
                 extra_flags="--limit $LIMIT"
                 ;;
         esac
         
-        go run main.go --db "$DB_PATH" --workflow "$WORKFLOW_ID" $DEBUG_FLAG $extra_flags
+        go run main.go $db_flag --workflow "$WORKFLOW_ID" $DEBUG_FLAG $extra_flags
         if [ $? -eq 0 ]; then
             echo -e "✓ $script_name completed successfully"
         else
@@ -162,6 +171,12 @@ run_script "identify_attributes" "Identify Attributes"
 
 # Match Intents
 run_script "match_intents" "Match Intents"
+
+# Generate Recommendations
+run_script "generate_recommendations" "Generate Recommendations"
+
+# Create Action Plan
+run_script "create_action_plan" "Create Action Plan"
 
 # Analyze Fee Disputes
 run_script "analyze_fee_disputes" "Analyze Fee Disputes"
