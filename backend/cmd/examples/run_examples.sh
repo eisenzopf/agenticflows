@@ -42,6 +42,7 @@ function show_usage {
     echo "  generate_recommendations Generate recommendations"
     echo "  create_action_plan      Create action plan (doesn't need database)"
     echo "  analyze_fee_disputes    Analyze fee dispute conversations"
+    echo "  test_intent_workflow    Test intent generation workflow"
     echo ""
     echo "When using -m (mock) flag, only scripts that support mock data will run."
     echo ""
@@ -87,7 +88,7 @@ while [[ $# -gt 0 ]]; do
             show_usage
             exit 0
             ;;
-        generate_intents|generate_attributes|group_intents|identify_attributes|match_intents|generate_recommendations|create_action_plan|analyze_fee_disputes)
+        generate_intents|generate_attributes|group_intents|identify_attributes|match_intents|generate_recommendations|create_action_plan|analyze_fee_disputes|test_intent_workflow)
             SELECTED_SCRIPT="$1"
             shift
             ;;
@@ -174,6 +175,10 @@ run_script() {
                 extra_flags="--budget 50000 --timespan \"6 months\""
                 db_flag="" # No DB needed for action plan
                 ;;
+            "test_intent_workflow")
+                extra_flags="" # No extra flags needed for intent workflow test
+                db_flag="" # No DB needed for intent workflow test
+                ;;
             *)
                 extra_flags="--limit $LIMIT"
                 ;;
@@ -209,6 +214,11 @@ if [ "$USE_MOCK" = true ]; then
         # Create Action Plan (already uses sample data)
         run_script "create_action_plan" "Create Action Plan"
     fi
+
+    if [ "$SELECTED_SCRIPT" = "test_intent_workflow" ] || [ "$RUN_ALL" = true ]; then
+        # Test Intent Workflow (uses sample data)
+        run_script "test_intent_workflow" "Test Intent Workflow"
+    fi
 else
     # Run selected script or all scripts when using a real database
     if [ "$SELECTED_SCRIPT" = "generate_intents" ] || [ "$RUN_ALL" = true ]; then
@@ -241,6 +251,10 @@ else
 
     if [ "$SELECTED_SCRIPT" = "analyze_fee_disputes" ] || [ "$RUN_ALL" = true ]; then
         run_script "analyze_fee_disputes" "Analyze Fee Disputes"
+    fi
+
+    if [ "$SELECTED_SCRIPT" = "test_intent_workflow" ] || [ "$RUN_ALL" = true ]; then
+        run_script "test_intent_workflow" "Test Intent Workflow"
     fi
 fi
 
