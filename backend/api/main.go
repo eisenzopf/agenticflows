@@ -18,6 +18,15 @@ type FlowData struct {
 	Edges json.RawMessage `json:"edges"`
 }
 
+// WorkflowExecutionConfig represents a configuration for executing a workflow
+type WorkflowExecutionConfig struct {
+	ID          string          `json:"id"`
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	InputTabs   json.RawMessage `json:"inputTabs"`
+	Parameters  json.RawMessage `json:"parameters"`
+}
+
 var flows = make(map[string]FlowData)
 var analysisHandler *AnalysisHandler
 
@@ -221,7 +230,19 @@ func handleWorkflow(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	// Extract workflow ID from URL
-	id := strings.TrimPrefix(r.URL.Path, "/api/workflows/")
+	pathParts := strings.Split(r.URL.Path, "/")
+	if len(pathParts) < 3 {
+		http.Error(w, "Workflow ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Check if it's a request for execution config
+	if len(pathParts) >= 4 && pathParts[3] == "execution-config" {
+		handleWorkflowExecutionConfig(w, r, pathParts[2])
+		return
+	}
+
+	id := pathParts[2]
 	if id == "" {
 		http.Error(w, "Workflow ID is required", http.StatusBadRequest)
 		return
@@ -290,5 +311,231 @@ func handleWorkflow(w http.ResponseWriter, r *http.Request) {
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// Handle /api/workflows/{id}/execution-config endpoint
+func handleWorkflowExecutionConfig(w http.ResponseWriter, r *http.Request, workflowId string) {
+	if r.Method != "GET" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get the workflow to analyze its nodes and edges
+	workflow, err := db.GetWorkflow(workflowId)
+	if err != nil {
+		http.Error(w, "Workflow not found", http.StatusNotFound)
+		return
+	}
+
+	// Parse workflow nodes to detect types of analysis
+	var nodes []map[string]interface{}
+	var edges []map[string]interface{}
+
+	err = json.Unmarshal([]byte(workflow.Nodes), &nodes)
+	if err != nil {
+		http.Error(w, "Invalid workflow nodes structure", http.StatusInternalServerError)
+		return
+	}
+
+	err = json.Unmarshal([]byte(workflow.Edges), &edges)
+	if err != nil {
+		// Non-critical error for configuration
+		log.Printf("Warning: Failed to parse edges for workflow %s: %v", workflowId, err)
+	}
+
+	// Build execution configuration based on workflow components
+	config := generateWorkflowExecutionConfig(workflowId, workflow.Name, nodes, edges)
+
+	// Return the configuration
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(config)
+}
+
+// Generate workflow execution configuration based on workflow components
+func generateWorkflowExecutionConfig(workflowId string, workflowName string, nodes []map[string]interface{}, edges []map[string]interface{}) WorkflowExecutionConfig {
+	// Define basic data source configuration
+	inputTabs := []map[string]interface{}{
+		{
+			"id":    "basicData",
+			"label": "Data Sources",
+			"dataSourceConfigs": []map[string]interface{}{
+				{
+					"id":          "manualInput",
+					"name":        "Manual Input",
+					"description": "Enter data manually for workflow execution",
+					"fields": []map[string]interface{}{
+						{
+							"id":          "text",
+							"label":       "Input Text",
+							"type":        "textarea",
+							"placeholder": "Enter text to analyze...",
+							"required":    false,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Check for database connections
+	hasDatabaseNode := false
+	for _, node := range nodes {
+		data, ok := node["data"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		nodeType, _ := data["nodeType"].(string)
+		label, _ := data["label"].(string)
+
+		if nodeType == "tool" &&
+			(strings.Contains(strings.ToLower(label), "database") ||
+				strings.Contains(strings.ToLower(label), "db")) {
+			hasDatabaseNode = true
+			break
+		}
+	}
+
+	// Add database configuration if needed
+	if hasDatabaseNode {
+		inputTabs[0]["dataSourceConfigs"] = append(
+			inputTabs[0]["dataSourceConfigs"].([]map[string]interface{}),
+			map[string]interface{}{
+				"id":          "databaseSource",
+				"name":        "Database Connection",
+				"description": "Configure database connection for data retrieval",
+				"fields": []map[string]interface{}{
+					{
+						"id":          "dbPath",
+						"label":       "Database Path",
+						"type":        "text",
+						"description": "Path to the SQLite database file",
+						"required":    true,
+					},
+					{
+						"id":           "maxItems",
+						"label":        "Maximum Items",
+						"type":         "number",
+						"description":  "Maximum number of items to retrieve",
+						"defaultValue": "100",
+						"required":     false,
+					},
+				},
+			},
+		)
+	}
+
+	// Define basic execution parameters
+	parameters := []map[string]interface{}{
+		{
+			"id":    "executionParams",
+			"label": "Execution Parameters",
+			"fields": []map[string]interface{}{
+				{
+					"id":           "batchSize",
+					"label":        "Batch Size",
+					"type":         "number",
+					"description":  "Number of items to process in each batch",
+					"defaultValue": "10",
+					"required":     false,
+				},
+				{
+					"id":           "debugMode",
+					"label":        "Enable Debug Mode",
+					"type":         "checkbox",
+					"defaultValue": false,
+					"required":     false,
+				},
+			},
+		},
+	}
+
+	// Check for specific analysis nodes and add parameters accordingly
+	hasNodeType := make(map[string]bool)
+
+	for _, node := range nodes {
+		data, ok := node["data"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		functionId, _ := data["functionId"].(string)
+		if functionId == "" {
+			continue
+		}
+
+		if strings.Contains(functionId, "analysis-trends") {
+			hasNodeType["trends"] = true
+		} else if strings.Contains(functionId, "analysis-patterns") {
+			hasNodeType["patterns"] = true
+		} else if strings.Contains(functionId, "analysis-findings") {
+			hasNodeType["findings"] = true
+		}
+	}
+
+	// Add parameters based on analysis types
+	if hasNodeType["trends"] {
+		parameters = append(parameters, map[string]interface{}{
+			"id":    "trendsParams",
+			"label": "Trends Analysis",
+			"fields": []map[string]interface{}{
+				{
+					"id":           "focusAreas",
+					"label":        "Focus Areas",
+					"type":         "text",
+					"description":  "Comma-separated list of focus areas for trend analysis",
+					"defaultValue": "customer_impact,financial_impact",
+					"required":     false,
+				},
+			},
+		})
+	}
+
+	if hasNodeType["patterns"] {
+		parameters = append(parameters, map[string]interface{}{
+			"id":    "patternsParams",
+			"label": "Patterns Analysis",
+			"fields": []map[string]interface{}{
+				{
+					"id":           "patternTypes",
+					"label":        "Pattern Types",
+					"type":         "text",
+					"description":  "Comma-separated list of pattern types to identify",
+					"defaultValue": "behavior_patterns,resolution_patterns",
+					"required":     false,
+				},
+			},
+		})
+	}
+
+	if hasNodeType["findings"] {
+		parameters = append(parameters, map[string]interface{}{
+			"id":    "findingsParams",
+			"label": "Findings Analysis",
+			"fields": []map[string]interface{}{
+				{
+					"id":           "questions",
+					"label":        "Analysis Questions",
+					"type":         "textarea",
+					"description":  "Enter questions for findings analysis (one per line)",
+					"defaultValue": "What are the most common patterns?\nWhat are the key areas for improvement?",
+					"required":     false,
+				},
+			},
+		})
+	}
+
+	// Marshal to JSON
+	inputTabsJson, _ := json.Marshal(inputTabs)
+	parametersJson, _ := json.Marshal(parameters)
+
+	// Prepare and return the configuration
+	return WorkflowExecutionConfig{
+		ID:          workflowId,
+		Name:        workflowName,
+		Description: "Execution configuration for " + workflowName,
+		InputTabs:   inputTabsJson,
+		Parameters:  parametersJson,
 	}
 }

@@ -698,6 +698,7 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
           }}
         >
           <WorkflowInputForm 
+            workflowId={activeWorkflowId || undefined}
             onSubmit={handleWorkflowInputSubmit} 
             onClose={() => setShowInputForm(false)} 
           />

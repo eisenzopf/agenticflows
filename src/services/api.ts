@@ -40,6 +40,41 @@ interface WorkflowEdge {
   };
 }
 
+// Define types for workflow input configuration
+export interface WorkflowInputField {
+  id: string;
+  label: string;
+  type: 'text' | 'number' | 'textarea' | 'checkbox' | 'select' | 'fileUpload';
+  description?: string;
+  placeholder?: string;
+  defaultValue?: any;
+  required?: boolean;
+  options?: { value: string; label: string }[]; // For select fields
+}
+
+export interface DataSourceConfig {
+  id: string;
+  name: string;
+  description: string;
+  fields: WorkflowInputField[];
+}
+
+export interface WorkflowInputConfig {
+  id: string;
+  name: string;
+  description: string;
+  inputTabs: {
+    id: string;
+    label: string;
+    dataSourceConfigs: DataSourceConfig[];
+  }[];
+  parameters: {
+    id: string;
+    label: string;
+    fields: WorkflowInputField[];
+  }[];
+}
+
 const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080') + '/api';
 
 export interface FunctionItem {
@@ -87,6 +122,7 @@ export interface FunctionMetadata {
 
 // Initialize cache as empty object instead of null
 let functionMetadataCache: Record<string, FunctionMetadata> = {};
+let workflowConfigCache: Record<string, WorkflowInputConfig> = {};
 
 export const api = {
   // Get all components (agents and tools)
@@ -378,7 +414,7 @@ export const api = {
   },
 
   // Execute a workflow of connected functions
-  executeWorkflow: async (workflowId: string, initialData: Record<string, any>): Promise<any> => {
+  executeWorkflow: async (workflowId: string, inputData: Record<string, any> = {}): Promise<any> => {
     try {
       // Get the workflow definition
       const workflow = await api.getWorkflow(workflowId);
@@ -403,7 +439,7 @@ export const api = {
       const sortedNodes = getExecutionOrder(functionNodes, edges);
       
       // Initialize results storage
-      let results: Record<string, any> = { ...initialData };
+      let results: Record<string, any> = { ...inputData };
       
       // Execute each node in order
       for (const node of sortedNodes) {
@@ -436,7 +472,7 @@ export const api = {
         }
         
         // Merge with initial data if needed
-        inputData = { ...inputData, ...initialData };
+        inputData = { ...inputData, ...results };
         
         // Execute the function based on its type
         let functionResult;
@@ -497,6 +533,36 @@ export const api = {
     console.log('Found metadata:', result ? 'yes' : 'no');
     
     return result;
+  },
+
+  // Get workflow execution configuration
+  getWorkflowExecutionConfig: async (workflowId: string): Promise<WorkflowInputConfig> => {
+    // Check cache first
+    if (workflowConfigCache[workflowId]) {
+      return workflowConfigCache[workflowId];
+    }
+    
+    try {
+      // Try to fetch from the backend
+      const response = await fetch(`${API_URL}/workflows/${workflowId}/execution-config`);
+      
+      if (response.ok) {
+        const config = await response.json();
+        // Store in cache
+        workflowConfigCache[workflowId] = config;
+        return config;
+      }
+    } catch (error) {
+      console.error("Error fetching workflow execution config:", error);
+    }
+    
+    // If no config exists or there was an error, generate based on workflow analysis
+    const workflow = await api.getWorkflow(workflowId);
+    const generatedConfig = await generateWorkflowConfig(workflow);
+    
+    // Store in cache
+    workflowConfigCache[workflowId] = generatedConfig;
+    return generatedConfig;
   },
 };
 
@@ -560,4 +626,161 @@ function getExecutionOrder(nodes: WorkflowNode[], edges: WorkflowEdge[]): Workfl
   }
   
   return result;
+}
+
+// Helper function to generate workflow configuration based on workflow nodes and edges
+async function generateWorkflowConfig(workflow: WorkflowData): Promise<WorkflowInputConfig> {
+  const nodes = workflow.nodes;
+  const edges = workflow.edges;
+  
+  // Default config
+  const config: WorkflowInputConfig = {
+    id: workflow.id,
+    name: workflow.name || 'Workflow Execution',
+    description: 'Input configuration for workflow execution',
+    inputTabs: [
+      {
+        id: 'basicData',
+        label: 'Data Sources',
+        dataSourceConfigs: []
+      }
+    ],
+    parameters: [
+      {
+        id: 'executionParams',
+        label: 'Execution Parameters',
+        fields: [
+          {
+            id: 'batchSize',
+            label: 'Batch Size',
+            type: 'number',
+            description: 'Number of items to process in each batch',
+            defaultValue: '10',
+            required: false
+          },
+          {
+            id: 'debugMode',
+            label: 'Enable Debug Mode',
+            type: 'checkbox',
+            defaultValue: false,
+            required: false
+          }
+        ]
+      }
+    ]
+  };
+  
+  // Find database nodes if any
+  const databaseNodes = nodes.filter(node => 
+    node.data?.nodeType === 'tool' && 
+    (node.data?.label?.toLowerCase().includes('database') || 
+     node.data?.label?.toLowerCase().includes('db'))
+  );
+  
+  // Find analysis functions if any
+  const analysisNodes = nodes.filter(node => 
+    node.data?.nodeType === 'function' && 
+    node.data?.functionId?.includes('analysis-')
+  );
+  
+  // Add database connection config if needed
+  if (databaseNodes.length > 0) {
+    config.inputTabs[0].dataSourceConfigs.push({
+      id: 'databaseSource',
+      name: 'Database Connection',
+      description: 'Configure database connection for data retrieval',
+      fields: [
+        {
+          id: 'dbPath',
+          label: 'Database Path',
+          type: 'text',
+          description: 'Path to the SQLite database file',
+          required: true
+        },
+        {
+          id: 'maxItems',
+          label: 'Maximum Items',
+          type: 'number',
+          description: 'Maximum number of items to retrieve',
+          defaultValue: '100',
+          required: false
+        }
+      ]
+    });
+  }
+  
+  // Add manual input for data
+  config.inputTabs[0].dataSourceConfigs.push({
+    id: 'manualInput',
+    name: 'Manual Input',
+    description: 'Enter data manually for workflow execution',
+    fields: [
+      {
+        id: 'text',
+        label: 'Input Text',
+        type: 'textarea',
+        placeholder: 'Enter text to analyze...',
+        required: false
+      }
+    ]
+  });
+  
+  // Customize for analysis types
+  if (analysisNodes.length > 0) {
+    // Check for trends analysis
+    if (analysisNodes.some(node => node.data?.functionId === 'analysis-trends')) {
+      config.parameters.push({
+        id: 'trendsParams',
+        label: 'Trends Analysis',
+        fields: [
+          {
+            id: 'focusAreas',
+            label: 'Focus Areas',
+            type: 'text',
+            description: 'Comma-separated list of focus areas for trend analysis',
+            defaultValue: 'customer_impact,financial_impact',
+            required: false
+          }
+        ]
+      });
+    }
+    
+    // Check for patterns analysis
+    if (analysisNodes.some(node => node.data?.functionId === 'analysis-patterns')) {
+      config.parameters.push({
+        id: 'patternsParams',
+        label: 'Patterns Analysis',
+        fields: [
+          {
+            id: 'patternTypes',
+            label: 'Pattern Types',
+            type: 'text',
+            description: 'Comma-separated list of pattern types to identify',
+            defaultValue: 'behavior_patterns,resolution_patterns',
+            required: false
+          }
+        ]
+      });
+    }
+    
+    // Check for findings analysis
+    if (analysisNodes.some(node => node.data?.functionId === 'analysis-findings')) {
+      config.parameters.push({
+        id: 'findingsParams',
+        label: 'Findings Analysis',
+        fields: [
+          {
+            id: 'questions',
+            label: 'Analysis Questions',
+            type: 'textarea',
+            description: 'Enter questions for findings analysis (one per line)',
+            defaultValue: 'What are the most common patterns?\nWhat are the key areas for improvement?',
+            required: false
+          }
+        ]
+      });
+    }
+  }
+  
+  return config;
 } 
