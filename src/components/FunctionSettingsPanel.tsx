@@ -585,34 +585,35 @@ const handleExecuteFunction = async (
     workflowId?: string;
   }
 ) => {
-  const { parameters, inputData, config, workflowId } = options;
-  
   try {
-    // Check if this is a chain analysis function
+    // Structure the request according to StandardAnalysisRequest format
+    const request = {
+      workflow_id: options.workflowId,
+      analysis_type: func.analysisType || func.id.split('-')[1],
+      parameters: options.parameters || {},
+      data: options.inputData || {},
+      text: options.inputData?.text || ''
+    };
+
+    // Special handling for chain analysis
     if (func.id === 'analysis-chain') {
-      // For chain analysis, use the specialized endpoint
       return await api.performChainAnalysis(
-        workflowId || 'temp-workflow',
-        inputData,
-        config
-      );
-    } else {
-      // For regular analysis functions, use the unified endpoint with the analysis type
-      const analysisType = func.analysisType || func.id.replace('analysis-', '');
-      
-      // Determine text vs data parameter based on input type
-      const isTextInput = typeof inputData === 'string';
-      
-      return await api.performAnalysis(
-        analysisType,
-        parameters || {},
-        isTextInput ? undefined : inputData,
-        isTextInput ? inputData : undefined,
-        workflowId
+        options.workflowId || '',
+        options.inputData || {},
+        options.config || {}
       );
     }
-  } catch (error: unknown) {
-    console.error('Error executing function:', error);
+
+    // Use the standardized analysis endpoint for all other functions
+    return await api.performAnalysis(
+      request.analysis_type,
+      request.parameters,
+      request.data,
+      request.text,
+      request.workflow_id
+    );
+  } catch (error) {
+    console.error(`Error executing function ${func.id}:`, error);
     throw error;
   }
 };

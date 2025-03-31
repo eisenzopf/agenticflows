@@ -60,6 +60,34 @@ export interface FunctionItem {
   }>;
 }
 
+// Add new types for function metadata
+export interface ParameterDefinition {
+  name: string;
+  path: string;
+  description: string;
+  required: boolean;
+  type: string;
+}
+
+export interface OutputDefinition {
+  name: string;
+  path: string;
+  description: string;
+  type: string;
+}
+
+export interface FunctionMetadata {
+  id: string;
+  label: string;
+  description: string;
+  inputs: ParameterDefinition[];
+  outputs: OutputDefinition[];
+  example?: Record<string, any>;
+}
+
+// Initialize cache as empty object instead of null
+let functionMetadataCache: Record<string, FunctionMetadata> = {};
+
 export const api = {
   // Get all components (agents and tools)
   getComponents: async (): Promise<{ agents: ComponentItem[], tools: ComponentItem[] }> => {
@@ -437,6 +465,30 @@ export const api = {
       console.error('Error executing workflow:', error);
       throw error;
     }
+  },
+
+  // Get metadata for all analysis functions
+  getFunctionMetadata: async (): Promise<Record<string, FunctionMetadata>> => {
+    if (Object.keys(functionMetadataCache).length > 0) {
+      return functionMetadataCache;
+    }
+
+    const response = await fetch(`${API_URL}/analysis/metadata`);
+    
+    if (!response.ok) {
+      throw new Error(`Failed to fetch function metadata: ${response.statusText}`);
+    }
+    
+    const metadata = await response.json();
+    functionMetadataCache = metadata;
+    return metadata;
+  },
+
+  // Get metadata for a specific function
+  getFunctionMetadataById: async (functionId: string): Promise<FunctionMetadata | null> => {
+    const metadata = await api.getFunctionMetadata();
+    const analysisType = functionId.split('-')[1];
+    return metadata[analysisType] || null;
   },
 };
 

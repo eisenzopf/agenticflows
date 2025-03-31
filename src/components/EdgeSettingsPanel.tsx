@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Edge } from 'reactflow';
 import { Button } from '@/components/ui/button';
 import { X, Plus, Trash2 } from 'lucide-react';
-import { FunctionItem } from '@/services/api';
+import { FunctionItem, api, ParameterDefinition, OutputDefinition } from '@/services/api';
 
 // Import interfaces from FlowEditor
 interface DataFlowMapping {
@@ -23,9 +23,31 @@ export default function EdgeSettingsPanel({ edge, sourceFunction, targetFunction
   const initialMappings = edge.data?.mappings || [];
   const [mappings, setMappings] = useState<DataFlowMapping[]>(initialMappings);
   
-  // Define source outputs and target inputs based on function schemas
-  const sourceOutputs = getSourceOutputs(sourceFunction);
-  const targetInputs = getTargetInputs(targetFunction);
+  // State for function metadata
+  const [sourceMetadata, setSourceMetadata] = useState<{ outputs: OutputDefinition[] }>({ outputs: [] });
+  const [targetMetadata, setTargetMetadata] = useState<{ inputs: ParameterDefinition[] }>({ inputs: [] });
+  const [loading, setLoading] = useState(true);
+  
+  // Fetch function metadata on mount
+  useEffect(() => {
+    const fetchMetadata = async () => {
+      try {
+        const [sourceMeta, targetMeta] = await Promise.all([
+          api.getFunctionMetadataById(sourceFunction.id),
+          api.getFunctionMetadataById(targetFunction.id)
+        ]);
+        
+        if (sourceMeta) setSourceMetadata(sourceMeta);
+        if (targetMeta) setTargetMetadata(targetMeta);
+        setLoading(false);
+      } catch (error) {
+        console.error('Error fetching function metadata:', error);
+        setLoading(false);
+      }
+    };
+    
+    fetchMetadata();
+  }, [sourceFunction.id, targetFunction.id]);
   
   // Update edge data when mappings change
   useEffect(() => {
@@ -34,10 +56,9 @@ export default function EdgeSettingsPanel({ edge, sourceFunction, targetFunction
   
   // Add a new mapping
   const addMapping = () => {
-    // Default to first available source output and target input
     const newMapping: DataFlowMapping = {
-      sourceOutput: sourceOutputs.length > 0 ? sourceOutputs[0].name : '',
-      targetInput: targetInputs.length > 0 ? targetInputs[0].name : ''
+      sourceOutput: sourceMetadata.outputs[0]?.path || '',
+      targetInput: targetMetadata.inputs[0]?.path || ''
     };
     
     setMappings([...mappings, newMapping]);
@@ -56,6 +77,14 @@ export default function EdgeSettingsPanel({ edge, sourceFunction, targetFunction
     updatedMappings.splice(index, 1);
     setMappings(updatedMappings);
   };
+  
+  if (loading) {
+    return (
+      <div className="h-full bg-card border-l flex items-center justify-center">
+        <div className="text-sm text-muted-foreground">Loading function metadata...</div>
+      </div>
+    );
+  }
   
   return (
     <div className="h-full bg-card border-l flex flex-col">
@@ -78,9 +107,10 @@ export default function EdgeSettingsPanel({ edge, sourceFunction, targetFunction
           
           <h4 className="text-sm font-medium mt-4 mb-2">Available Outputs:</h4>
           <ul className="text-sm text-muted-foreground ml-4 list-disc">
-            {sourceOutputs.map(output => (
-              <li key={output.name}>
+            {sourceMetadata.outputs.map(output => (
+              <li key={output.path}>
                 <span className="font-medium">{output.name}</span>: {output.description}
+                <span className="text-xs text-muted-foreground ml-1">({output.type})</span>
               </li>
             ))}
           </ul>
@@ -97,9 +127,11 @@ export default function EdgeSettingsPanel({ edge, sourceFunction, targetFunction
           
           <h4 className="text-sm font-medium mt-4 mb-2">Required Inputs:</h4>
           <ul className="text-sm text-muted-foreground ml-4 list-disc">
-            {targetInputs.map(input => (
-              <li key={input.name}>
+            {targetMetadata.inputs.map(input => (
+              <li key={input.path}>
                 <span className="font-medium">{input.name}</span>: {input.description}
+                <span className="text-xs text-muted-foreground ml-1">({input.type})</span>
+                {input.required && <span className="text-xs text-red-500 ml-1">(Required)</span>}
               </li>
             ))}
           </ul>
@@ -135,9 +167,9 @@ export default function EdgeSettingsPanel({ edge, sourceFunction, targetFunction
                       onChange={(e) => updateMapping(index, 'sourceOutput', e.target.value)}
                       className="w-full text-sm p-2 border rounded-md"
                     >
-                      {sourceOutputs.map(output => (
-                        <option key={output.name} value={output.name}>
-                          {output.name}
+                      {sourceMetadata.outputs.map(output => (
+                        <option key={output.path} value={output.path}>
+                          {output.name} ({output.type})
                         </option>
                       ))}
                     </select>
@@ -156,9 +188,9 @@ export default function EdgeSettingsPanel({ edge, sourceFunction, targetFunction
                       onChange={(e) => updateMapping(index, 'targetInput', e.target.value)}
                       className="w-full text-sm p-2 border rounded-md"
                     >
-                      {targetInputs.map(input => (
-                        <option key={input.name} value={input.name}>
-                          {input.name}
+                      {targetMetadata.inputs.map(input => (
+                        <option key={input.path} value={input.path}>
+                          {input.name} ({input.type})
                         </option>
                       ))}
                     </select>
@@ -180,103 +212,4 @@ export default function EdgeSettingsPanel({ edge, sourceFunction, targetFunction
       </div>
     </div>
   );
-}
-
-// Helper function to get source outputs based on function type
-function getSourceOutputs(func: FunctionItem): { name: string; description: string; }[] {
-  // This would typically come from the function's schema
-  // For now, we'll hardcode some example outputs based on function type
-  
-  switch (func.id) {
-    case 'analysis-trends':
-      return [
-        { name: 'trend_descriptions', description: 'Descriptions of identified trends' },
-        { name: 'recommended_actions', description: 'Recommended actions based on trends' }
-      ];
-    case 'analysis-patterns':
-      return [
-        { name: 'patterns', description: 'List of identified patterns' }
-      ];
-    case 'analysis-findings':
-      return [
-        { name: 'findings', description: 'Analytical findings' },
-        { name: 'recommendations', description: 'Recommended actions' }
-      ];
-    case 'analysis-attributes':
-      return [
-        { name: 'attribute_values', description: 'Extracted attribute values' }
-      ];
-    case 'analysis-intent':
-      return [
-        { name: 'label_name', description: 'Machine-readable intent label' },
-        { name: 'label', description: 'Human-readable intent label' },
-        { name: 'description', description: 'Intent description' }
-      ];
-    case 'analysis-recommendations':
-      return [
-        { name: 'recommendations', description: 'Recommended actions' },
-        { name: 'priorities', description: 'Priority ratings for recommendations' }
-      ];
-    case 'analysis-plan':
-      return [
-        { name: 'action_plan', description: 'Full action plan' },
-        { name: 'timeline', description: 'Implementation timeline' },
-        { name: 'resources', description: 'Required resources' }
-      ];
-    default:
-      return [
-        { name: 'results', description: 'Analysis results' }
-      ];
-  }
-}
-
-// Helper function to get target inputs based on function type
-function getTargetInputs(func: FunctionItem): { name: string; description: string; required?: boolean }[] {
-  // This would typically come from the function's schema
-  // For now, we'll hardcode some example inputs based on function type
-  
-  switch (func.id) {
-    case 'analysis-trends':
-      return [
-        { name: 'disputes', description: 'Dispute data to analyze', required: true },
-        { name: 'conversations', description: 'Example conversations' },
-        { name: 'attributes', description: 'Additional attributes' }
-      ];
-    case 'analysis-patterns':
-      return [
-        { name: 'disputes', description: 'Dispute data to analyze', required: true },
-        { name: 'conversations', description: 'Example conversations' },
-        { name: 'attributes', description: 'Attributes to look for patterns' }
-      ];
-    case 'analysis-findings':
-      return [
-        { name: 'disputes', description: 'Dispute data to analyze', required: true },
-        { name: 'trends', description: 'Trend analysis results' },
-        { name: 'patterns', description: 'Pattern analysis results' },
-        { name: 'conversations', description: 'Example conversations' }
-      ];
-    case 'analysis-attributes':
-      return [
-        { name: 'text', description: 'Text to extract attributes from', required: true }
-      ];
-    case 'analysis-intent':
-      return [
-        { name: 'text', description: 'Text to extract intent from', required: true }
-      ];
-    case 'analysis-recommendations':
-      return [
-        { name: 'data', description: 'Data for recommendation generation', required: true },
-        { name: 'findings', description: 'Analysis findings' },
-        { name: 'patterns', description: 'Identified patterns' }
-      ];
-    case 'analysis-plan':
-      return [
-        { name: 'recommendations', description: 'Recommendations to build plan from', required: true },
-        { name: 'context', description: 'Context information' }
-      ];
-    default:
-      return [
-        { name: 'data', description: 'Input data', required: true }
-      ];
-  }
 } 

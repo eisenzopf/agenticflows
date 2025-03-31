@@ -1225,3 +1225,107 @@ func (h *AnalysisHandler) handleChainAnalysis(w http.ResponseWriter, r *http.Req
 		http.Error(w, "Error encoding response", http.StatusInternalServerError)
 	}
 }
+
+// FunctionMetadata represents the metadata for an analysis function
+type FunctionMetadata struct {
+	ID          string                 `json:"id"`
+	Label       string                 `json:"label"`
+	Description string                 `json:"description"`
+	Inputs      []ParameterDefinition  `json:"inputs"`
+	Outputs     []OutputDefinition     `json:"outputs"`
+	Example     map[string]interface{} `json:"example,omitempty"`
+}
+
+type ParameterDefinition struct {
+	Name        string `json:"name"`
+	Path        string `json:"path"`
+	Description string `json:"description"`
+	Required    bool   `json:"required"`
+	Type        string `json:"type"`
+}
+
+type OutputDefinition struct {
+	Name        string `json:"name"`
+	Path        string `json:"path"`
+	Description string `json:"description"`
+	Type        string `json:"type"`
+}
+
+func (h *AnalysisHandler) handleGetFunctionMetadata(w http.ResponseWriter, r *http.Request) {
+	metadata := map[string]FunctionMetadata{
+		"trends": {
+			ID:          "analysis-trends",
+			Label:       "Analyze Trends",
+			Description: "Analyze trends in conversation data",
+			Inputs: []ParameterDefinition{
+				{
+					Name:        "Focus Areas",
+					Path:        "parameters.focus_areas",
+					Description: "Areas to focus trend analysis on",
+					Required:    true,
+					Type:        "string[]",
+				},
+				{
+					Name:        "Historical Data",
+					Path:        "data.historical_data",
+					Description: "Historical data for trend analysis",
+					Required:    true,
+					Type:        "object",
+				},
+			},
+			Outputs: []OutputDefinition{
+				{
+					Name:        "Trends",
+					Path:        "results.trends",
+					Description: "Identified trends and patterns",
+					Type:        "object[]",
+				},
+				{
+					Name:        "Metrics",
+					Path:        "results.metrics",
+					Description: "Trend metrics and statistics",
+					Type:        "object",
+				},
+			},
+		},
+		"patterns": {
+			ID:          "analysis-patterns",
+			Label:       "Identify Patterns",
+			Description: "Identify patterns in conversation data",
+			Inputs: []ParameterDefinition{
+				{
+					Name:        "Pattern Types",
+					Path:        "parameters.pattern_types",
+					Description: "Types of patterns to identify",
+					Required:    true,
+					Type:        "string[]",
+				},
+				{
+					Name:        "Sample Data",
+					Path:        "data.sample_data",
+					Description: "Data samples to analyze",
+					Required:    true,
+					Type:        "object[]",
+				},
+			},
+			Outputs: []OutputDefinition{
+				{
+					Name:        "Patterns",
+					Path:        "results.patterns",
+					Description: "Identified patterns",
+					Type:        "object[]",
+				},
+				{
+					Name:        "Categories",
+					Path:        "results.categories",
+					Description: "Pattern categories",
+					Type:        "string[]",
+				},
+			},
+		},
+		// Add other function metadata...
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(metadata)
+}
