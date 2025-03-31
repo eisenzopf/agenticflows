@@ -2,6 +2,7 @@ package db
 
 import (
 	"encoding/json"
+	"log"
 )
 
 // GetAllWorkflows returns all workflows from the database
@@ -16,7 +17,7 @@ func GetAllWorkflows() ([]Workflow, error) {
 	for rows.Next() {
 		var workflow Workflow
 		var nodesStr, edgesStr string
-		
+
 		err := rows.Scan(
 			&workflow.ID,
 			&workflow.Name,
@@ -27,10 +28,10 @@ func GetAllWorkflows() ([]Workflow, error) {
 		if err != nil {
 			return nil, err
 		}
-		
+
 		workflow.Nodes = json.RawMessage(nodesStr)
 		workflow.Edges = json.RawMessage(edgesStr)
-		
+
 		workflows = append(workflows, workflow)
 	}
 
@@ -46,8 +47,10 @@ func GetWorkflow(id string) (Workflow, error) {
 	var workflow Workflow
 	var nodesStr, edgesStr string
 
+	log.Printf("DEBUG: Attempting to get workflow with ID: %s", id)
+
 	err := DB.QueryRow(
-		"SELECT id, name, date, nodes, edges FROM workflows WHERE id = ?",
+		"SELECT id, name, date, nodes, edges FROM workflows WHERE id = ? COLLATE NOCASE",
 		id,
 	).Scan(
 		&workflow.ID,
@@ -56,14 +59,17 @@ func GetWorkflow(id string) (Workflow, error) {
 		&nodesStr,
 		&edgesStr,
 	)
-	
+
 	if err != nil {
+		log.Printf("DEBUG: Error retrieving workflow: %v", err)
 		return Workflow{}, err
 	}
-	
+
+	log.Printf("DEBUG: Successfully found workflow: %s", workflow.Name)
+
 	workflow.Nodes = json.RawMessage(nodesStr)
 	workflow.Edges = json.RawMessage(edgesStr)
-	
+
 	return workflow, nil
 }
 
@@ -77,7 +83,7 @@ func CreateWorkflow(workflow Workflow) error {
 		string(workflow.Nodes),
 		string(workflow.Edges),
 	)
-	
+
 	return err
 }
 
@@ -91,7 +97,7 @@ func UpdateWorkflow(id string, workflow Workflow) error {
 		string(workflow.Edges),
 		id,
 	)
-	
+
 	return err
 }
 
@@ -104,6 +110,6 @@ func DeleteWorkflow(id string) error {
 // WorkflowExists checks if a workflow with the given ID exists
 func WorkflowExists(id string) (bool, error) {
 	var exists bool
-	err := DB.QueryRow("SELECT EXISTS(SELECT 1 FROM workflows WHERE id = ?)", id).Scan(&exists)
+	err := DB.QueryRow("SELECT EXISTS(SELECT 1 FROM workflows WHERE id = ? COLLATE NOCASE)", id).Scan(&exists)
 	return exists, err
-} 
+}

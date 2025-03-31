@@ -137,6 +137,7 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
   const [isExecuting, setIsExecuting] = useState(false);
   const [showInputForm, setShowInputForm] = useState(false);
   const [showResultsViewer, setShowResultsViewer] = useState(false);
+  const [workflowConfig, setWorkflowConfig] = useState<any>(null);
 
   // Fetch function components when component mounts
   useEffect(() => {
@@ -643,8 +644,57 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
 
   // Show input form when executing workflow
   const handleExecuteClick = useCallback(() => {
+    // Make sure we apply a database source configuration for workflows
+    if (workflowConfig) {
+      // Ensure SQLite database source is available in any workflow config
+      const hasDatabaseConfig = workflowConfig.inputTabs?.some((tab: {id: string, dataSourceConfigs?: any[]}) => 
+        tab.dataSourceConfigs?.some((source: {id: string}) => source.id === 'databaseSource')
+      );
+      
+      if (!hasDatabaseConfig && workflowConfig.inputTabs) {
+        // Add the database source to the first input tab
+        const firstTab = workflowConfig.inputTabs[0];
+        if (firstTab && firstTab.dataSourceConfigs) {
+          firstTab.dataSourceConfigs.unshift({
+            id: 'databaseSource',
+            name: 'SQLite Database',
+            description: 'Use a SQLite database file for dispute analysis',
+            fields: [
+              {
+                id: 'dbPath',
+                label: 'Database Path',
+                type: 'text',
+                placeholder: '/path/to/your/database.db',
+                defaultValue: '',
+                description: 'Path to the SQLite database file to analyze',
+                required: true
+              },
+              {
+                id: 'maxDisputes',
+                label: 'Maximum Disputes',
+                type: 'number',
+                placeholder: '100',
+                defaultValue: '100',
+                description: 'Maximum number of disputes to analyze',
+                required: false
+              },
+              {
+                id: 'conversationLimit',
+                label: 'Conversation Limit',
+                type: 'number',
+                placeholder: '5',
+                defaultValue: '5',
+                description: 'Number of example conversations to include',
+                required: false
+              }
+            ]
+          });
+        }
+      }
+    }
+    
     setShowInputForm(true);
-  }, []);
+  }, [workflowConfig]);
   
   // Handle workflow input form submission
   const handleWorkflowInputSubmit = useCallback((inputData: Record<string, any>) => {

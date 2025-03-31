@@ -230,87 +230,115 @@ func handleWorkflow(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	// Extract workflow ID from URL
-	pathParts := strings.Split(r.URL.Path, "/")
-	if len(pathParts) < 3 {
+	path := strings.TrimPrefix(r.URL.Path, "/api/workflows/")
+	pathParts := strings.Split(path, "/")
+	log.Printf("DEBUG: Adjusted path parts: %v", pathParts)
+
+	if path == "" {
 		http.Error(w, "Workflow ID is required", http.StatusBadRequest)
 		return
 	}
 
 	// Check if it's a request for execution config
-	if len(pathParts) >= 4 && pathParts[3] == "execution-config" {
-		handleWorkflowExecutionConfig(w, r, pathParts[2])
-		return
-	}
+	if len(pathParts) >= 1 && pathParts[0] != "" {
+		id := pathParts[0]
 
-	id := pathParts[2]
-	if id == "" {
+		// Check if it's a request for execution config
+		if len(pathParts) > 1 && pathParts[1] == "execution-config" {
+			log.Printf("DEBUG: Handling execution config request for workflow: %s", id)
+			handleWorkflowExecutionConfig(w, r, id)
+			return
+		}
+
+		log.Printf("DEBUG: Handling workflow request for ID: %s", id)
+
+		switch r.Method {
+		case "GET":
+			// Get a specific workflow
+			workflow, err := db.GetWorkflow(id)
+			if err != nil {
+				log.Printf("DEBUG: Error in GetWorkflow: %v (type: %T)", err, err)
+
+				// Check if the workflow exists with direct database query
+				exists, checkErr := db.WorkflowExists(id)
+				if checkErr != nil {
+					log.Printf("DEBUG: Error in WorkflowExists check: %v", checkErr)
+				} else {
+					log.Printf("DEBUG: WorkflowExists result: %v", exists)
+				}
+
+				// List all workflows in the database for debugging
+				allWorkflows, listErr := db.GetAllWorkflows()
+				if listErr != nil {
+					log.Printf("DEBUG: Error listing all workflows: %v", listErr)
+				} else {
+					log.Printf("DEBUG: All workflows in DB:")
+					for _, w := range allWorkflows {
+						log.Printf("  - ID: %s, Name: %s", w.ID, w.Name)
+					}
+				}
+
+				http.Error(w, "Workflow not found", http.StatusNotFound)
+				return
+			}
+			json.NewEncoder(w).Encode(workflow)
+
+		case "PUT":
+			// Update a workflow
+			var updatedWorkflow db.Workflow
+			if err := json.NewDecoder(r.Body).Decode(&updatedWorkflow); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+
+			// Check if workflow exists
+			exists, err := db.WorkflowExists(id)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if !exists {
+				http.Error(w, "Workflow not found", http.StatusNotFound)
+				return
+			}
+
+			// Update the date
+			if updatedWorkflow.Date == "" {
+				updatedWorkflow.Date = time.Now().Format("2006-01-02")
+			}
+
+			// Ensure ID consistency
+			updatedWorkflow.ID = id
+
+			if err := db.UpdateWorkflow(id, updatedWorkflow); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			json.NewEncoder(w).Encode(updatedWorkflow)
+
+		case "DELETE":
+			// Delete a workflow
+			exists, err := db.WorkflowExists(id)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if !exists {
+				http.Error(w, "Workflow not found", http.StatusNotFound)
+				return
+			}
+
+			if err := db.DeleteWorkflow(id); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	} else {
 		http.Error(w, "Workflow ID is required", http.StatusBadRequest)
-		return
-	}
-
-	switch r.Method {
-	case "GET":
-		// Get a specific workflow
-		workflow, err := db.GetWorkflow(id)
-		if err != nil {
-			http.Error(w, "Workflow not found", http.StatusNotFound)
-			return
-		}
-		json.NewEncoder(w).Encode(workflow)
-
-	case "PUT":
-		// Update a workflow
-		var updatedWorkflow db.Workflow
-		if err := json.NewDecoder(r.Body).Decode(&updatedWorkflow); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		// Check if workflow exists
-		exists, err := db.WorkflowExists(id)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if !exists {
-			http.Error(w, "Workflow not found", http.StatusNotFound)
-			return
-		}
-
-		// Update the date
-		if updatedWorkflow.Date == "" {
-			updatedWorkflow.Date = time.Now().Format("2006-01-02")
-		}
-
-		// Ensure ID consistency
-		updatedWorkflow.ID = id
-
-		if err := db.UpdateWorkflow(id, updatedWorkflow); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		json.NewEncoder(w).Encode(updatedWorkflow)
-
-	case "DELETE":
-		// Delete a workflow
-		exists, err := db.WorkflowExists(id)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if !exists {
-			http.Error(w, "Workflow not found", http.StatusNotFound)
-			return
-		}
-
-		if err := db.DeleteWorkflow(id); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-
-	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 
@@ -321,9 +349,12 @@ func handleWorkflowExecutionConfig(w http.ResponseWriter, r *http.Request, workf
 		return
 	}
 
+	log.Printf("DEBUG: Handling execution config for workflow ID: %s", workflowId)
+
 	// Get the workflow to analyze its nodes and edges
 	workflow, err := db.GetWorkflow(workflowId)
 	if err != nil {
+		log.Printf("DEBUG: Error fetching workflow for execution config: %v", err)
 		http.Error(w, "Workflow not found", http.StatusNotFound)
 		return
 	}
@@ -334,6 +365,7 @@ func handleWorkflowExecutionConfig(w http.ResponseWriter, r *http.Request, workf
 
 	err = json.Unmarshal([]byte(workflow.Nodes), &nodes)
 	if err != nil {
+		log.Printf("DEBUG: Error parsing workflow nodes: %v", err)
 		http.Error(w, "Invalid workflow nodes structure", http.StatusInternalServerError)
 		return
 	}
