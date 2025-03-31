@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import FlowEditor, { FlowEditorHandle } from "@/components/FlowEditor";
-import { Save, Sparkles } from "lucide-react";
+import { Save, Sparkles, Wand2 } from "lucide-react";
 import dynamic from "next/dynamic";
 
 // Dynamically import the WorkflowGeneratorModal
@@ -13,10 +13,17 @@ const WorkflowGeneratorModal = dynamic(
   { ssr: false }
 );
 
+// Dynamically import the DynamicWorkflowGeneratorModal
+const DynamicWorkflowGeneratorModal = dynamic(
+  () => import("@/components/DynamicWorkflowGeneratorModal"),
+  { ssr: false }
+);
+
 export default function Home() {
   // Create a ref to access the FlowEditor's methods
   const flowEditorRef = useRef<FlowEditorHandle>(null);
   const [isGeneratorOpen, setIsGeneratorOpen] = useState(false);
+  const [isDynamicGeneratorOpen, setIsDynamicGeneratorOpen] = useState(false);
 
   const handleSaveFlow = async () => {
     if (flowEditorRef.current) {
@@ -55,6 +62,14 @@ export default function Home() {
               <Sparkles className="h-4 w-4 mr-2" />
               Generate Workflow
             </Button>
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={() => setIsDynamicGeneratorOpen(true)}
+            >
+              <Wand2 className="h-4 w-4 mr-2" />
+              Generate Dynamic Workflow
+            </Button>
           </div>
         </div>
       </div>
@@ -73,6 +88,20 @@ export default function Home() {
           onWorkflowGenerated={(workflowId: string) => {
             // After workflow is generated, close the modal
             setIsGeneratorOpen(false);
+            // Optionally: redirect or load the new workflow
+            if (flowEditorRef.current) {
+              flowEditorRef.current.loadWorkflow(workflowId);
+            }
+          }}
+        />
+      )}
+      
+      {isDynamicGeneratorOpen && (
+        <DynamicWorkflowGeneratorModal 
+          onClose={() => setIsDynamicGeneratorOpen(false)}
+          onWorkflowGenerated={(workflowId: string) => {
+            // After workflow is generated, close the modal
+            setIsDynamicGeneratorOpen(false);
             // Optionally: redirect or load the new workflow
             if (flowEditorRef.current) {
               flowEditorRef.current.loadWorkflow(workflowId);

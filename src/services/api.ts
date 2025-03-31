@@ -532,6 +532,29 @@ export const api = {
     }
   },
 
+  // Generate a dynamic workflow from description
+  generateDynamicWorkflow: async (name: string, description: string): Promise<WorkflowData> => {
+    try {
+      const response = await fetch(`${API_URL}/workflows/generate-dynamic`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name, description }),
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || `Failed to generate dynamic workflow (${response.status})`);
+      }
+      
+      return response.json();
+    } catch (error) {
+      console.error('Error generating dynamic workflow:', error);
+      throw error;
+    }
+  },
+
   // Answer questions about banking data
   answerQuestions: async (
     questions: string[], 

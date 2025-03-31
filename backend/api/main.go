@@ -50,41 +50,8 @@ func main() {
 		log.Println("Analysis endpoints will not be available")
 	}
 
-	// API routes
-	http.HandleFunc("/api/agents", handleAgents)
-	http.HandleFunc("/api/tools", handleTools)
-	http.HandleFunc("/api/workflows", handleWorkflows)
-	http.HandleFunc("/api/workflows/", handleWorkflow)
-
-	// Add new workflow generation endpoint
-	http.HandleFunc("/api/workflows/generate", handleGenerateWorkflow)
-
-	// Add new question answering endpoint
-	http.HandleFunc("/api/questions/answer", handleAnswerQuestions)
-
-	// Analysis routes (if initialized)
-	if analysisHandler != nil {
-		// New unified endpoint
-		http.HandleFunc("/api/analysis", analysisHandler.handleAnalysis)
-
-		// Chain analysis endpoint for workflows
-		http.HandleFunc("/api/analysis/chain", analysisHandler.handleChainAnalysis)
-
-		// Function metadata endpoint
-		http.HandleFunc("/api/analysis/metadata", analysisHandler.handleGetFunctionMetadata)
-
-		// Enable debugging for analysis requests
-		log.Println("Analysis endpoints initialized with types: trends, patterns, findings, attributes, intent, recommendations, plan")
-
-		// Legacy endpoints (kept for backward compatibility)
-		/*http.HandleFunc("/api/analysis/trends", analysisHandler.handleAnalysisTrends)
-		http.HandleFunc("/api/analysis/patterns", analysisHandler.handleAnalysisPatterns)
-		http.HandleFunc("/api/analysis/findings", analysisHandler.handleAnalysisFindings)
-		http.HandleFunc("/api/analysis/attributes", analysisHandler.handleTextAttributes)
-		http.HandleFunc("/api/analysis/intent", analysisHandler.handleTextIntent)
-		http.HandleFunc("/api/analysis/results", analysisHandler.handleAnalysisResults)
-		http.HandleFunc("/api/analysis/results/", analysisHandler.handleAnalysisResults)*/
-	}
+	// Set up API routes
+	setupRoutes()
 
 	// CORS middleware for development
 	handler := corsMiddleware(http.DefaultServeMux)
@@ -1890,4 +1857,306 @@ func extractFindingsFromResponse(results interface{}) ([]string, bool) {
 	}
 
 	return nil, false
+}
+
+func handleGenerateDynamicWorkflow(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse request body
+	var req struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid request: %s", err), http.StatusBadRequest)
+		return
+	}
+
+	// Validate request
+	if req.Name == "" || req.Description == "" {
+		http.Error(w, "Name and description are required", http.StatusBadRequest)
+		return
+	}
+
+	// Generate dynamic workflow
+	workflow, err := generateDynamicWorkflowFromDescription(req.Name, req.Description)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to generate dynamic workflow: %s", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Save the generated workflow to the database
+	if err := db.CreateWorkflow(workflow); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to save workflow: %s", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Return the generated workflow
+	json.NewEncoder(w).Encode(workflow)
+}
+
+// generateDynamicWorkflowFromDescription uses LLM to generate a dynamic workflow with custom functions
+func generateDynamicWorkflowFromDescription(name, description string) (db.Workflow, error) {
+	// Get the API key from environment
+	apiKey := os.Getenv("GEMINI_API_KEY")
+	if apiKey == "" {
+		return db.Workflow{}, fmt.Errorf("GEMINI_API_KEY environment variable not set")
+	}
+
+	// Create LLM client
+	llmClient, err := analysis.NewLLMClient(apiKey, false)
+	if err != nil {
+		return db.Workflow{}, fmt.Errorf("failed to create LLM client: %s", err)
+	}
+
+	// Create the prompt for dynamic workflow
+	prompt := createDynamicWorkflowGenerationPrompt(name, description)
+
+	// Call the LLM API
+	log.Printf("Generating dynamic workflow with prompt: %s", prompt)
+
+	// Provide a structured template to help the LLM
+	defaultTemplate := map[string]interface{}{
+		"nodes": []interface{}{
+			map[string]interface{}{
+				"id":   "node-1",
+				"type": "function",
+				"position": map[string]interface{}{
+					"x": 250,
+					"y": 100,
+				},
+				"data": map[string]interface{}{
+					"nodeType":    "function",
+					"functionId":  "custom-function-1",
+					"label":       "Custom Function 1",
+					"description": "This is a custom function",
+				},
+			},
+		},
+		"edges": []interface{}{},
+	}
+
+	result, err := llmClient.GenerateContent(context.Background(), prompt, defaultTemplate)
+	if err != nil {
+		return db.Workflow{}, fmt.Errorf("failed to generate dynamic workflow from LLM: %s", err)
+	}
+
+	// Parse the result - convert interface{} to string
+	resultStr, ok := result.(string)
+	if !ok {
+		log.Printf("Failed to convert LLM response to string, got type: %T", result)
+		// Try to marshal the result to string
+		resultBytes, err := json.Marshal(result)
+		if err != nil {
+			return db.Workflow{}, fmt.Errorf("failed to convert LLM response to string: %v", err)
+		}
+		resultStr = string(resultBytes)
+	}
+
+	// Log the raw response for debugging
+	log.Printf("Raw LLM response: %s", resultStr)
+
+	// Parse the result
+	workflow, err := parseDynamicWorkflowFromLLMResponse(name, resultStr)
+	if err != nil {
+		return db.Workflow{}, fmt.Errorf("failed to parse LLM response: %s", err)
+	}
+
+	// Set defaults and metadata
+	workflow.ID = fmt.Sprintf("wf-dyn-%d", time.Now().UnixNano())
+	workflow.Date = time.Now().Format("2006-01-02")
+
+	return workflow, nil
+}
+
+func createDynamicWorkflowGenerationPrompt(name, description string) string {
+	prompt := fmt.Sprintf(`As an expert workflow designer, create a dynamic workflow called "%s" based on this description:
+
+Description: %s
+
+IMPORTANT: Unlike a standard workflow, this is a DYNAMIC workflow which means you need to:
+1. Create custom functions that are specific to this workflow's needs
+2. Define clear inputs and outputs for each function
+3. Ensure the functions work together to achieve the workflow goal
+4. Each function should have a description field explaining what it does
+
+Your response MUST be a valid JSON object with the following structure:
+{
+  "nodes": [
+    {
+      "id": "node-1",
+      "type": "function",
+      "position": { "x": 250, "y": 100 },
+      "data": {
+        "nodeType": "function",
+        "functionId": "custom-function-1",
+        "label": "Extract Important Data",
+        "description": "Extracts key data points from input text",
+        "inputs": [
+          {
+            "name": "text",
+            "description": "Input text to process",
+            "required": true
+          }
+        ],
+        "outputs": [
+          {
+            "name": "extractedData",
+            "description": "Extracted data points"
+          }
+        ]
+      }
+    },
+    {
+      "id": "node-2",
+      "type": "function",
+      "position": { "x": 250, "y": 250 },
+      "data": {
+        "nodeType": "function",
+        "functionId": "custom-function-2",
+        "label": "Analyze Data",
+        "description": "Analyzes the extracted data",
+        "inputs": [
+          {
+            "name": "extractedData",
+            "description": "Data to analyze",
+            "required": true
+          }
+        ],
+        "outputs": [
+          {
+            "name": "analysis",
+            "description": "Analysis results"
+          }
+        ]
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge-1-2",
+      "source": "node-1",
+      "target": "node-2",
+      "data": {
+        "mappings": [
+          {
+            "sourceOutput": "extractedData",
+            "targetInput": "extractedData"
+          }
+        ]
+      }
+    }
+  ]
+}
+
+CREATE CUSTOM FUNCTIONS SPECIFIC TO THE WORKFLOW DESCRIPTION.
+
+Ensure each node has:
+- A unique "id" field
+- Appropriate "position" coordinates (x, y) for visual layout
+- A "data" object containing nodeType, functionId, label, and description
+- Input and output definitions that make sense for the function
+
+Do not include any additional text or explanations outside of the JSON object.
+`, name, description)
+
+	return prompt
+}
+
+func parseDynamicWorkflowFromLLMResponse(name string, llmResponse string) (db.Workflow, error) {
+	// Parse the LLM response to extract the workflow structure
+	var workflowData map[string]interface{}
+
+	// First try to unmarshal the entire response
+	err := json.Unmarshal([]byte(llmResponse), &workflowData)
+	if err != nil {
+		// Try to extract JSON from a text response
+		jsonStart := strings.Index(llmResponse, "{")
+		jsonEnd := strings.LastIndex(llmResponse, "}")
+
+		if jsonStart >= 0 && jsonEnd > jsonStart {
+			jsonStr := llmResponse[jsonStart : jsonEnd+1]
+			if err := json.Unmarshal([]byte(jsonStr), &workflowData); err != nil {
+				return db.Workflow{}, fmt.Errorf("failed to parse LLM response as JSON: %s", err)
+			}
+		} else {
+			return db.Workflow{}, fmt.Errorf("failed to extract JSON from LLM response")
+		}
+	}
+
+	// Debug logging
+	jsonBytes, _ := json.MarshalIndent(workflowData, "", "  ")
+	log.Printf("Parsed LLM response: %s", string(jsonBytes))
+
+	// Check if nodes exists
+	nodes, nodesExist := workflowData["nodes"]
+	if !nodesExist {
+		// Create default empty nodes array if missing
+		nodes = []interface{}{}
+		log.Printf("Nodes field missing from LLM response, using empty array")
+	}
+
+	// Check if edges exists
+	edges, edgesExist := workflowData["edges"]
+	if !edgesExist {
+		// Create default empty edges array if missing
+		edges = []interface{}{}
+		log.Printf("Edges field missing from LLM response, using empty array")
+	}
+
+	// Convert to JSON
+	nodesJSON, err := json.Marshal(nodes)
+	if err != nil {
+		return db.Workflow{}, fmt.Errorf("failed to marshal nodes: %s", err)
+	}
+
+	edgesJSON, err := json.Marshal(edges)
+	if err != nil {
+		return db.Workflow{}, fmt.Errorf("failed to marshal edges: %s", err)
+	}
+
+	// Create workflow
+	workflow := db.Workflow{
+		Name:  name,
+		Nodes: nodesJSON,
+		Edges: edgesJSON,
+	}
+
+	return workflow, nil
+}
+
+func setupRoutes() {
+	// Basic API routes
+	http.HandleFunc("/api/agents", handleAgents)
+	http.HandleFunc("/api/tools", handleTools)
+	http.HandleFunc("/api/workflows", handleWorkflows)
+	http.HandleFunc("/api/workflows/", handleWorkflow)
+
+	// Workflow generation endpoints
+	http.HandleFunc("/api/workflows/generate", handleGenerateWorkflow)
+	http.HandleFunc("/api/workflows/generate-dynamic", handleGenerateDynamicWorkflow)
+
+	// Question answering endpoint
+	http.HandleFunc("/api/questions/answer", handleAnswerQuestions)
+
+	// Analysis routes (if initialized)
+	if analysisHandler != nil {
+		// New unified endpoint
+		http.HandleFunc("/api/analysis", analysisHandler.handleAnalysis)
+
+		// Chain analysis endpoint for workflows
+		http.HandleFunc("/api/analysis/chain", analysisHandler.handleChainAnalysis)
+
+		// Function metadata endpoint
+		http.HandleFunc("/api/analysis/metadata", analysisHandler.handleGetFunctionMetadata)
+
+		// Enable debugging for analysis requests
+		log.Println("Analysis endpoints initialized with types: trends, patterns, findings, attributes, intent, recommendations, plan")
+	}
 }
