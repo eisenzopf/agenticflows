@@ -637,6 +637,10 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
   // Memoize defaultViewport to prevent recreation on each render
   const defaultViewport = useMemo(() => ({ x: 0, y: 0, zoom: 0.8 }), []);
 
+  // Memoize nodeTypes and edgeTypes to prevent recreation on each render
+  const nodeTypes = useMemo(() => ({}), []);
+  const edgeTypes = useMemo(() => ({}), []);
+
   // Show input form when executing workflow
   const handleExecuteClick = useCallback(() => {
     setShowInputForm(true);
@@ -752,6 +756,8 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
           defaultEdgeOptions={defaultEdgeOptions}
           connectionLineType={ConnectionLineType.SmoothStep}
           connectionLineStyle={connectionLineStyle}
+          nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
           fitView
         >
           <Controls position="bottom-right" />
