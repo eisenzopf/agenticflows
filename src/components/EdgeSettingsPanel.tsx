@@ -32,10 +32,19 @@ export default function EdgeSettingsPanel({ edge, sourceFunction, targetFunction
   useEffect(() => {
     const fetchMetadata = async () => {
       try {
+        console.log('Fetching metadata for', sourceFunction.id, targetFunction.id);
+        
         const [sourceMeta, targetMeta] = await Promise.all([
           api.getFunctionMetadataById(sourceFunction.id),
           api.getFunctionMetadataById(targetFunction.id)
         ]);
+        
+        console.log('Retrieved metadata:', { 
+          sourceId: sourceFunction.id,
+          sourceMeta, 
+          targetId: targetFunction.id,
+          targetMeta 
+        });
         
         if (sourceMeta) setSourceMetadata(sourceMeta);
         if (targetMeta) setTargetMetadata(targetMeta);

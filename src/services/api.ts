@@ -486,9 +486,17 @@ export const api = {
 
   // Get metadata for a specific function
   getFunctionMetadataById: async (functionId: string): Promise<FunctionMetadata | null> => {
+    console.log('Getting metadata for function ID:', functionId);
+    
     const metadata = await api.getFunctionMetadata();
     const analysisType = functionId.split('-')[1];
-    return metadata[analysisType] || null;
+    
+    console.log('Looking up analysis type:', analysisType, 'Available types:', Object.keys(metadata));
+    
+    const result = metadata[analysisType] || null;
+    console.log('Found metadata:', result ? 'yes' : 'no');
+    
+    return result;
   },
 };
 

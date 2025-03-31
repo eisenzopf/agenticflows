@@ -1323,7 +1323,245 @@ func (h *AnalysisHandler) handleGetFunctionMetadata(w http.ResponseWriter, r *ht
 				},
 			},
 		},
-		// Add other function metadata...
+		"intent": {
+			ID:          "analysis-intent",
+			Label:       "Generate Intent",
+			Description: "Identify the primary intent in a conversation",
+			Inputs: []ParameterDefinition{
+				{
+					Name:        "Text",
+					Path:        "text",
+					Description: "Text to analyze for intent",
+					Required:    true,
+					Type:        "string",
+				},
+			},
+			Outputs: []OutputDefinition{
+				{
+					Name:        "Label Name",
+					Path:        "results.label_name",
+					Description: "Human-readable intent label",
+					Type:        "string",
+				},
+				{
+					Name:        "Label",
+					Path:        "results.label",
+					Description: "Machine-readable intent label",
+					Type:        "string",
+				},
+				{
+					Name:        "Description",
+					Path:        "results.description",
+					Description: "Intent description",
+					Type:        "string",
+				},
+			},
+		},
+		"findings": {
+			ID:          "analysis-findings",
+			Label:       "Analyze Findings",
+			Description: "Generate findings based on analysis",
+			Inputs: []ParameterDefinition{
+				{
+					Name:        "Questions",
+					Path:        "parameters.questions",
+					Description: "Questions to answer in the analysis",
+					Required:    true,
+					Type:        "string[]",
+				},
+				{
+					Name:        "Analysis Results",
+					Path:        "data.analysis_results",
+					Description: "Previous analysis results to analyze",
+					Required:    true,
+					Type:        "object",
+				},
+			},
+			Outputs: []OutputDefinition{
+				{
+					Name:        "Findings",
+					Path:        "results.findings",
+					Description: "Key findings from analysis",
+					Type:        "string[]",
+				},
+				{
+					Name:        "Insights",
+					Path:        "results.insights",
+					Description: "Derived insights",
+					Type:        "string[]",
+				},
+				{
+					Name:        "Data Gaps",
+					Path:        "results.data_gaps",
+					Description: "Identified gaps in data",
+					Type:        "string[]",
+				},
+			},
+		},
+		"attributes": {
+			ID:          "analysis-attributes",
+			Label:       "Extract Attributes",
+			Description: "Extract attribute values from text",
+			Inputs: []ParameterDefinition{
+				{
+					Name:        "Text",
+					Path:        "text",
+					Description: "Text to extract attributes from",
+					Required:    true,
+					Type:        "string",
+				},
+				{
+					Name:        "Attributes",
+					Path:        "parameters.attributes",
+					Description: "Attribute definitions",
+					Required:    true,
+					Type:        "object[]",
+				},
+			},
+			Outputs: []OutputDefinition{
+				{
+					Name:        "Attribute Values",
+					Path:        "results.attribute_values",
+					Description: "Extracted attribute values",
+					Type:        "object[]",
+				},
+			},
+		},
+		"recommendations": {
+			ID:          "analysis-recommendations",
+			Label:       "Generate Recommendations",
+			Description: "Generate actionable recommendations",
+			Inputs: []ParameterDefinition{
+				{
+					Name:        "Focus Area",
+					Path:        "parameters.focus_area",
+					Description: "Area to focus recommendations on",
+					Required:    true,
+					Type:        "string",
+				},
+				{
+					Name:        "Analysis Results",
+					Path:        "data.analysis_results",
+					Description: "Analysis results to base recommendations on",
+					Required:    true,
+					Type:        "object",
+				},
+			},
+			Outputs: []OutputDefinition{
+				{
+					Name:        "Immediate Actions",
+					Path:        "results.immediate_actions",
+					Description: "Recommended immediate actions",
+					Type:        "object[]",
+				},
+				{
+					Name:        "Implementation Notes",
+					Path:        "results.implementation_notes",
+					Description: "Implementation notes and guidance",
+					Type:        "string[]",
+				},
+				{
+					Name:        "Success Metrics",
+					Path:        "results.success_metrics",
+					Description: "Success metrics for recommendations",
+					Type:        "string[]",
+				},
+			},
+		},
+		"plan": {
+			ID:          "analysis-plan",
+			Label:       "Create Action Plan",
+			Description: "Create implementation plan from recommendations",
+			Inputs: []ParameterDefinition{
+				{
+					Name:        "Recommendations",
+					Path:        "data.recommendations",
+					Description: "Recommendations to plan from",
+					Required:    true,
+					Type:        "object",
+				},
+				{
+					Name:        "Constraints",
+					Path:        "parameters.constraints",
+					Description: "Implementation constraints",
+					Required:    false,
+					Type:        "object",
+				},
+			},
+			Outputs: []OutputDefinition{
+				{
+					Name:        "Goals",
+					Path:        "results.goals",
+					Description: "Plan goals",
+					Type:        "string[]",
+				},
+				{
+					Name:        "Immediate Actions",
+					Path:        "results.immediate_actions",
+					Description: "Immediate actions to take",
+					Type:        "object[]",
+				},
+				{
+					Name:        "Short Term Actions",
+					Path:        "results.short_term_actions",
+					Description: "Short-term actions to take",
+					Type:        "object[]",
+				},
+				{
+					Name:        "Long Term Actions",
+					Path:        "results.long_term_actions",
+					Description: "Long-term actions to take",
+					Type:        "object[]",
+				},
+				{
+					Name:        "Timeline",
+					Path:        "results.timeline",
+					Description: "Implementation timeline",
+					Type:        "object[]",
+				},
+				{
+					Name:        "Risks Mitigations",
+					Path:        "results.risks_mitigations",
+					Description: "Risk analysis and mitigations",
+					Type:        "object[]",
+				},
+			},
+		},
+		"chain": {
+			ID:          "analysis-chain",
+			Label:       "Chain Analysis",
+			Description: "Perform a chain of analysis steps",
+			Inputs: []ParameterDefinition{
+				{
+					Name:        "Input Data",
+					Path:        "input_data",
+					Description: "Initial data for analysis chain",
+					Required:    true,
+					Type:        "object",
+				},
+				{
+					Name:        "Configuration",
+					Path:        "config",
+					Description: "Chain analysis configuration",
+					Required:    true,
+					Type:        "object",
+				},
+			},
+			Outputs: []OutputDefinition{
+				{
+					Name:        "Results",
+					Path:        "results",
+					Description: "Combined analysis results",
+					Type:        "object",
+				},
+				{
+					Name:        "Duration",
+					Path:        "duration",
+					Description: "Analysis duration",
+					Type:        "string",
+				},
+			},
+		},
 	}
 
 	w.Header().Set("Content-Type", "application/json")
