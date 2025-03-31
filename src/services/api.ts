@@ -508,6 +508,60 @@ export const api = {
     workflowConfigCache[workflowId] = generatedConfig;
     return generatedConfig;
   },
+
+  // Generate a workflow from description
+  generateWorkflow: async (name: string, description: string): Promise<WorkflowData> => {
+    try {
+      const response = await fetch(`${API_URL}/workflows/generate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name, description }),
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || `Failed to generate workflow (${response.status})`);
+      }
+      
+      return response.json();
+    } catch (error) {
+      console.error('Error generating workflow:', error);
+      throw error;
+    }
+  },
+
+  // Answer questions about banking data
+  answerQuestions: async (
+    questions: string[], 
+    databasePath: string = '/Users/jonathan/Documents/Work/discourse_ai/Research/corpora/banking_2025/db/standard_charter_bank.db', 
+    context?: string
+  ): Promise<{ answers: Array<{ question: string, answer: string }> }> => {
+    try {
+      const response = await fetch(`${API_URL}/questions/answer`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          questions, 
+          databasePath, 
+          context
+        }),
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || `Failed to answer questions (${response.status})`);
+      }
+      
+      return response.json();
+    } catch (error) {
+      console.error('Error answering questions:', error);
+      throw error;
+    }
+  },
 };
 
 // Helper function to determine execution order of nodes based on dependencies

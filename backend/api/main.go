@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -53,6 +55,12 @@ func main() {
 	http.HandleFunc("/api/tools", handleTools)
 	http.HandleFunc("/api/workflows", handleWorkflows)
 	http.HandleFunc("/api/workflows/", handleWorkflow)
+
+	// Add new workflow generation endpoint
+	http.HandleFunc("/api/workflows/generate", handleGenerateWorkflow)
+
+	// Add new question answering endpoint
+	http.HandleFunc("/api/questions/answer", handleAnswerQuestions)
 
 	// Analysis routes (if initialized)
 	if analysisHandler != nil {
@@ -1230,4 +1238,656 @@ func convertToMap(data interface{}) map[string]interface{} {
 	}
 
 	return result
+}
+
+// Create a new handler for workflow generation
+func handleGenerateWorkflow(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse request body
+	var req struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid request: %s", err), http.StatusBadRequest)
+		return
+	}
+
+	// Validate request
+	if req.Name == "" || req.Description == "" {
+		http.Error(w, "Name and description are required", http.StatusBadRequest)
+		return
+	}
+
+	// Generate workflow
+	workflow, err := generateWorkflowFromDescription(req.Name, req.Description)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to generate workflow: %s", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Save the generated workflow to the database
+	if err := db.CreateWorkflow(workflow); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to save workflow: %s", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Return the generated workflow
+	json.NewEncoder(w).Encode(workflow)
+}
+
+// generateWorkflowFromDescription uses LLM to generate a workflow based on the description
+func generateWorkflowFromDescription(name, description string) (db.Workflow, error) {
+	// Get the API key from environment
+	apiKey := os.Getenv("GEMINI_API_KEY")
+	if apiKey == "" {
+		return db.Workflow{}, fmt.Errorf("GEMINI_API_KEY environment variable not set")
+	}
+
+	// Create LLM client
+	llmClient, err := analysis.NewLLMClient(apiKey, false)
+	if err != nil {
+		return db.Workflow{}, fmt.Errorf("failed to create LLM client: %s", err)
+	}
+
+	// Create function metadata for the prompt
+	functionMetadata, err := getFunctionMetadataForLLM()
+	if err != nil {
+		return db.Workflow{}, fmt.Errorf("failed to get function metadata: %s", err)
+	}
+
+	// Create the prompt
+	prompt := createWorkflowGenerationPrompt(name, description, functionMetadata)
+
+	// Call the LLM API
+	result, err := llmClient.GenerateContent(context.Background(), prompt, map[string]interface{}{
+		"nodes": []interface{}{},
+		"edges": []interface{}{},
+	})
+	if err != nil {
+		return db.Workflow{}, fmt.Errorf("failed to generate workflow from LLM: %s", err)
+	}
+
+	// Parse the result
+	workflow, err := parseWorkflowFromLLMResponse(name, result)
+	if err != nil {
+		return db.Workflow{}, fmt.Errorf("failed to parse LLM response: %s", err)
+	}
+
+	// Default database path setting
+	const defaultDBPath = "/Users/jonathan/Documents/Work/discourse_ai/Research/corpora/banking_2025/db/standard_charter_bank.db"
+
+	// Set defaults and metadata
+	workflow.ID = fmt.Sprintf("wf-%d", time.Now().UnixNano())
+	workflow.Date = time.Now().Format("2006-01-02")
+
+	// Add a description node to include information about the default database
+	nodesStr := string(workflow.Nodes)
+	if nodesStr != "" {
+		var nodes []map[string]interface{}
+		err = json.Unmarshal(workflow.Nodes, &nodes)
+		if err == nil {
+			// Look for a text or note node we can update
+			noteNodeFound := false
+			for i, node := range nodes {
+				nodeType, _ := node["type"].(string)
+				if nodeType == "note" || nodeType == "text" {
+					// Update existing note node
+					if data, ok := node["data"].(map[string]interface{}); ok {
+						data["text"] = fmt.Sprintf("Database: %s\n\n%s",
+							defaultDBPath,
+							data["text"])
+						node["data"] = data
+						nodes[i] = node
+						noteNodeFound = true
+						break
+					}
+				}
+			}
+
+			// If no note node exists, add one
+			if !noteNodeFound {
+				noteNode := map[string]interface{}{
+					"id":   fmt.Sprintf("note-%d", time.Now().UnixNano()),
+					"type": "note",
+					"position": map[string]interface{}{
+						"x": 100,
+						"y": 100,
+					},
+					"data": map[string]interface{}{
+						"text": fmt.Sprintf("Database Path: %s\n\nThis workflow is configured to use the banking conversations database.", defaultDBPath),
+					},
+				}
+				nodes = append(nodes, noteNode)
+			}
+
+			// Update the nodes in the workflow
+			updatedNodes, _ := json.Marshal(nodes)
+			workflow.Nodes = json.RawMessage(updatedNodes)
+		}
+	}
+
+	return workflow, nil
+}
+
+// Create prompt for the LLM to generate a workflow
+func createWorkflowGenerationPrompt(name, description string, functionMetadata []map[string]interface{}) string {
+	prompt := fmt.Sprintf(`As an expert workflow designer, create a workflow called "%s" based on this description:
+
+Description: %s
+
+Available functions for the workflow:
+`, name, description)
+
+	// Add function descriptions
+	for _, fn := range functionMetadata {
+		prompt += fmt.Sprintf("\n- %s: %s\n", fn["id"], fn["description"])
+
+		// Add inputs
+		prompt += "  Inputs:\n"
+		if inputs, ok := fn["inputs"].([]map[string]interface{}); ok {
+			for _, input := range inputs {
+				prompt += fmt.Sprintf("    - %s: %s\n", input["name"], input["description"])
+			}
+		}
+
+		// Add outputs
+		prompt += "  Outputs:\n"
+		if outputs, ok := fn["outputs"].([]map[string]interface{}); ok {
+			for _, output := range outputs {
+				prompt += fmt.Sprintf("    - %s: %s\n", output["name"], output["description"])
+			}
+		}
+	}
+
+	prompt += `
+The workflow will process data from a SQLite database with these tables:
+- conversations (conversation_id, date_time, text, client_id, agent_id)
+- attribute_definitions (id, field_name, title, description, type, enum_values, intent_type, workflow_id, created_at)
+
+Default database path: /Users/jonathan/Documents/Work/discourse_ai/Research/corpora/banking_2025/db/standard_charter_bank.db
+
+Please respond with a JSON object containing:
+1. A list of nodes (workflow steps)
+2. A list of edges (connections between steps)
+3. For each node, specify the function type and any configuration
+4. For edges, specify source node, target node, and data mappings
+
+Format your response as valid JSON with this structure:
+{
+  "nodes": [
+    {
+      "id": "node-1",
+      "type": "function",
+      "position": { "x": 250, "y": 100 },
+      "data": {
+        "nodeType": "function",
+        "functionId": "analysis-attributes",
+        "label": "Extract Attributes"
+      }
+    },
+    ...more nodes...
+  ],
+  "edges": [
+    {
+      "id": "edge-1-2",
+      "source": "node-1",
+      "target": "node-2",
+      "data": {
+        "mappings": [
+          {
+            "sourceOutput": "results.attributes",
+            "targetInput": "parameters.attributes" 
+          }
+        ]
+      }
+    },
+    ...more edges...
+  ]
+}
+
+Create an effective workflow that processes banking conversations, extracts meaningful attributes, identifies patterns, and provides insights or recommendations based on the description.`
+
+	return prompt
+}
+
+// getFunctionMetadataForLLM gets function metadata in a format usable by the LLM
+func getFunctionMetadataForLLM() ([]map[string]interface{}, error) {
+	// Create a list of function metadata
+	metadata := []map[string]interface{}{
+		{
+			"id":          "analysis-trends",
+			"label":       "Analyze Trends",
+			"description": "Analyze trends in conversation data",
+			"inputs": []map[string]interface{}{
+				{
+					"name":        "Focus Areas",
+					"description": "Areas to focus trend analysis on",
+					"required":    true,
+				},
+				{
+					"name":        "Text",
+					"description": "Text to analyze for trends",
+					"required":    false,
+				},
+			},
+			"outputs": []map[string]interface{}{
+				{
+					"name":        "Trends",
+					"description": "Identified trends and patterns",
+				},
+				{
+					"name":        "Metrics",
+					"description": "Trend metrics and statistics",
+				},
+			},
+		},
+		{
+			"id":          "analysis-patterns",
+			"label":       "Identify Patterns",
+			"description": "Identify patterns in conversation data",
+			"inputs": []map[string]interface{}{
+				{
+					"name":        "Pattern Types",
+					"description": "Types of patterns to identify",
+					"required":    true,
+				},
+				{
+					"name":        "Text",
+					"description": "Text to analyze for patterns",
+					"required":    false,
+				},
+			},
+			"outputs": []map[string]interface{}{
+				{
+					"name":        "Patterns",
+					"description": "Identified patterns",
+				},
+				{
+					"name":        "Categories",
+					"description": "Pattern categories",
+				},
+			},
+		},
+		{
+			"id":          "analysis-findings",
+			"label":       "Analyze Findings",
+			"description": "Generate findings from analysis results",
+			"inputs": []map[string]interface{}{
+				{
+					"name":        "Questions",
+					"description": "Questions to answer based on the analysis",
+					"required":    true,
+				},
+				{
+					"name":        "Text",
+					"description": "Text to analyze for findings",
+					"required":    false,
+				},
+			},
+			"outputs": []map[string]interface{}{
+				{
+					"name":        "Findings",
+					"description": "Key findings and insights",
+				},
+				{
+					"name":        "Evidence",
+					"description": "Supporting evidence for findings",
+				},
+			},
+		},
+		{
+			"id":          "analysis-attributes",
+			"label":       "Extract Attributes",
+			"description": "Extract attributes from text",
+			"inputs": []map[string]interface{}{
+				{
+					"name":        "Attributes",
+					"description": "Attributes to extract",
+					"required":    true,
+				},
+				{
+					"name":        "Text",
+					"description": "Text to extract attributes from",
+					"required":    true,
+				},
+			},
+			"outputs": []map[string]interface{}{
+				{
+					"name":        "Extracted Attributes",
+					"description": "Extracted attribute values",
+				},
+				{
+					"name":        "Confidence",
+					"description": "Confidence scores for extracted attributes",
+				},
+			},
+		},
+		{
+			"id":          "analysis-intent",
+			"label":       "Generate Intent",
+			"description": "Generate intent from text",
+			"inputs": []map[string]interface{}{
+				{
+					"name":        "Text",
+					"description": "Text to analyze for intent",
+					"required":    true,
+				},
+			},
+			"outputs": []map[string]interface{}{
+				{
+					"name":        "Intent",
+					"description": "Identified intent",
+				},
+				{
+					"name":        "Confidence",
+					"description": "Confidence score for intent",
+				},
+			},
+		},
+		{
+			"id":          "analysis-recommendations",
+			"label":       "Generate Recommendations",
+			"description": "Generate recommendations based on analysis results",
+			"inputs": []map[string]interface{}{
+				{
+					"name":        "Focus Area",
+					"description": "Area to focus recommendations on",
+					"required":    true,
+				},
+				{
+					"name":        "Findings",
+					"description": "Findings to base recommendations on",
+					"required":    true,
+				},
+			},
+			"outputs": []map[string]interface{}{
+				{
+					"name":        "Recommendations",
+					"description": "List of recommended actions",
+				},
+				{
+					"name":        "Priority",
+					"description": "Priority levels for recommendations",
+				},
+			},
+		},
+		{
+			"id":          "analysis-plan",
+			"label":       "Create Action Plan",
+			"description": "Create action plan from recommendations",
+			"inputs": []map[string]interface{}{
+				{
+					"name":        "Recommendations",
+					"description": "Recommendations to include in the plan",
+					"required":    true,
+				},
+				{
+					"name":        "Timeline",
+					"description": "Timeline requirements",
+					"required":    false,
+				},
+			},
+			"outputs": []map[string]interface{}{
+				{
+					"name":        "Plan",
+					"description": "Detailed action plan",
+				},
+				{
+					"name":        "Timeline",
+					"description": "Implementation timeline",
+				},
+			},
+		},
+		{
+			"id":          "analysis-chain",
+			"label":       "Chain Analysis",
+			"description": "Perform a complete chain of analysis steps",
+			"inputs": []map[string]interface{}{
+				{
+					"name":        "Text",
+					"description": "Text to analyze",
+					"required":    true,
+				},
+				{
+					"name":        "Config",
+					"description": "Analysis configuration",
+					"required":    true,
+				},
+			},
+			"outputs": []map[string]interface{}{
+				{
+					"name":        "Results",
+					"description": "Combined analysis results",
+				},
+			},
+		},
+	}
+
+	return metadata, nil
+}
+
+// parseWorkflowFromLLMResponse parses the LLM response into a workflow
+func parseWorkflowFromLLMResponse(name string, llmResponse interface{}) (db.Workflow, error) {
+	respMap, ok := llmResponse.(map[string]interface{})
+	if !ok {
+		return db.Workflow{}, fmt.Errorf("unexpected response format, expected map")
+	}
+
+	// Extract nodes
+	nodesRaw, ok := respMap["nodes"]
+	if !ok {
+		return db.Workflow{}, fmt.Errorf("nodes field missing from response")
+	}
+
+	// Extract edges
+	edgesRaw, ok := respMap["edges"]
+	if !ok {
+		return db.Workflow{}, fmt.Errorf("edges field missing from response")
+	}
+
+	// Convert to JSON strings
+	nodesBytes, err := json.Marshal(nodesRaw)
+	if err != nil {
+		return db.Workflow{}, fmt.Errorf("failed to marshal nodes: %s", err)
+	}
+
+	edgesBytes, err := json.Marshal(edgesRaw)
+	if err != nil {
+		return db.Workflow{}, fmt.Errorf("failed to marshal edges: %s", err)
+	}
+
+	// Create the workflow
+	workflow := db.Workflow{
+		ID:    fmt.Sprintf("wf-%d", time.Now().UnixNano()),
+		Name:  name,
+		Date:  time.Now().Format("2006-01-02"),
+		Nodes: json.RawMessage(nodesBytes),
+		Edges: json.RawMessage(edgesBytes),
+	}
+
+	return workflow, nil
+}
+
+// handleAnswerQuestions processes questions about the banking conversations
+func handleAnswerQuestions(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse request body
+	var req struct {
+		Questions    []string               `json:"questions"`
+		Context      string                 `json:"context,omitempty"`
+		DatabasePath string                 `json:"databasePath,omitempty"`
+		Parameters   map[string]interface{} `json:"parameters,omitempty"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid request: %s", err), http.StatusBadRequest)
+		return
+	}
+
+	// Validate request
+	if len(req.Questions) == 0 {
+		http.Error(w, "At least one question is required", http.StatusBadRequest)
+		return
+	}
+
+	// Set default database path if not provided
+	dbPath := req.DatabasePath
+	if dbPath == "" {
+		dbPath = "/Users/jonathan/Documents/Work/discourse_ai/Research/corpora/banking_2025/db/standard_charter_bank.db"
+	}
+
+	// Create context for the analysis
+	ctx := context.Background()
+
+	// Initialize context data if not provided
+	contextData := req.Context
+	if contextData == "" {
+		// Fetch sample conversations from the database
+		var err error
+		contextData, err = getSampleConversationsFromDB(dbPath)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to get sample conversations: %s", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Process each question
+	answers := make([]map[string]interface{}, 0)
+	for _, question := range req.Questions {
+		// Create analysis request for this question
+		analysisReq := analysis.StandardAnalysisRequest{
+			AnalysisType: "findings",
+			Text:         contextData,
+			Parameters: map[string]interface{}{
+				"questions": []string{question},
+			},
+		}
+
+		// Execute the analysis
+		response, err := analysisHandler.handleFindingsAnalysis(ctx, analysisReq)
+		if err != nil {
+			answers = append(answers, map[string]interface{}{
+				"question": question,
+				"answer":   fmt.Sprintf("Error analyzing question: %s", err),
+				"error":    true,
+			})
+			continue
+		}
+
+		// Get the answer from the results
+		var answer string
+		if response.Results != nil {
+			// Extract the first finding as the answer
+			findings, ok := extractFindingsFromResponse(response.Results)
+			if ok && len(findings) > 0 {
+				answer = findings[0]
+			} else {
+				answer = "No findings were generated for this question."
+			}
+		} else {
+			answer = "No response was generated for this question."
+		}
+
+		// Add to answers
+		answers = append(answers, map[string]interface{}{
+			"question": question,
+			"answer":   answer,
+		})
+	}
+
+	// Return the answers
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"answers": answers,
+	})
+}
+
+// Helper function to get sample conversations from database
+func getSampleConversationsFromDB(dbPath string) (string, error) {
+	// Open the database
+	sqliteDB, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to open database: %s", err)
+	}
+	defer sqliteDB.Close()
+
+	// Query for sample conversations
+	query := `SELECT text FROM conversations LIMIT 10`
+	rows, err := sqliteDB.Query(query)
+	if err != nil {
+		return "", fmt.Errorf("failed to query conversations: %s", err)
+	}
+	defer rows.Close()
+
+	// Build the context from conversations
+	var conversations []string
+	for rows.Next() {
+		var text string
+		if err := rows.Scan(&text); err != nil {
+			return "", fmt.Errorf("failed to scan row: %s", err)
+		}
+		conversations = append(conversations, text)
+	}
+
+	if err := rows.Err(); err != nil {
+		return "", fmt.Errorf("error iterating rows: %s", err)
+	}
+
+	if len(conversations) == 0 {
+		return "No conversations found in the database.", nil
+	}
+
+	return strings.Join(conversations, "\n\n---\n\n"), nil
+}
+
+// Helper to extract findings from a response
+func extractFindingsFromResponse(results interface{}) ([]string, bool) {
+	// Try to cast directly to map
+	resultsMap, ok := results.(map[string]interface{})
+	if !ok {
+		// Try to unmarshal from JSON if it's a string
+		if strResults, ok := results.(string); ok {
+			var parsedResults map[string]interface{}
+			if err := json.Unmarshal([]byte(strResults), &parsedResults); err == nil {
+				resultsMap = parsedResults
+				ok = true
+			}
+		}
+	}
+
+	if !ok {
+		return nil, false
+	}
+
+	// Look for findings in various possible formats
+	if findings, ok := resultsMap["findings"].([]interface{}); ok {
+		// Convert findings to strings
+		stringFindings := make([]string, 0, len(findings))
+		for _, finding := range findings {
+			if str, ok := finding.(string); ok {
+				stringFindings = append(stringFindings, str)
+			} else {
+				// Try to marshal to string
+				if bytes, err := json.Marshal(finding); err == nil {
+					stringFindings = append(stringFindings, string(bytes))
+				}
+			}
+		}
+		return stringFindings, true
+	}
+
+	return nil, false
 }
