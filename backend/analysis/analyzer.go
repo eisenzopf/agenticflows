@@ -999,3 +999,251 @@ func (a *Analyzer) ExtractAttributes(ctx context.Context, req AnalysisRequest) (
 		Confidence: 0.8,
 	}, nil
 }
+
+// TransformForIntent prepares attribute data for intent analysis
+func (a *Analyzer) TransformForIntent(data interface{}) (string, error) {
+	// Intent analysis primarily expects text, so we need to extract or convert to text
+	var text string
+
+	switch v := data.(type) {
+	case string:
+		// If it's already a string, use it directly
+		text = v
+	case map[string]interface{}:
+		// If it's a map, check if it has text or attribute values we can use
+		if textVal, ok := v["text"].(string); ok && textVal != "" {
+			text = textVal
+		} else if rawContent, ok := v["raw_content"].(string); ok && rawContent != "" {
+			text = rawContent
+		} else if attrValues, ok := v["attribute_values"].(map[string]interface{}); ok {
+			// Try to find conversation text in attributes
+			// Common field names for conversation text
+			textFields := []string{"transcript", "conversation_text", "content", "message", "text"}
+
+			for _, field := range textFields {
+				if fieldVal, ok := attrValues[field].(string); ok && fieldVal != "" {
+					text = fieldVal
+					break
+				}
+			}
+
+			// If no text found but we have attributes, create a simplified text representation
+			if text == "" {
+				var sb strings.Builder
+				sb.WriteString("Conversation attributes:\n")
+
+				for k, v := range attrValues {
+					sb.WriteString(fmt.Sprintf("%s: %v\n", k, v))
+				}
+
+				text = sb.String()
+			}
+		}
+	default:
+		// For other types, try to marshal to string
+		bytes, err := json.Marshal(data)
+		if err != nil {
+			return "", fmt.Errorf("failed to transform data for intent: %w", err)
+		}
+		text = string(bytes)
+	}
+
+	return text, nil
+}
+
+// TransformIntentForFindings prepares intent data for findings analysis
+func (a *Analyzer) TransformIntentForFindings(intentData interface{}, questions []string) (map[string]interface{}, error) {
+	result := make(map[string]interface{})
+
+	// Extract intent data
+	switch v := intentData.(type) {
+	case map[string]interface{}:
+		// If it's already a map, check if it has the intent structure
+		if v["label"] != nil || v["label_name"] != nil {
+			// It appears to be intent data, add it to intents array
+			result["intents"] = []interface{}{v}
+		} else {
+			// Just use the map directly
+			result = v
+		}
+	case *IntentClassification:
+		// Convert IntentClassification to map
+		intentMap := map[string]interface{}{
+			"label":       v.Label,
+			"label_name":  v.LabelName,
+			"description": v.Description,
+		}
+		result["intents"] = []interface{}{intentMap}
+	default:
+		// For other types, try to marshal and unmarshal
+		bytes, err := json.Marshal(intentData)
+		if err != nil {
+			return nil, fmt.Errorf("failed to transform intent data: %w", err)
+		}
+
+		// Try to unmarshal as intent classification
+		var intent IntentClassification
+		if err := json.Unmarshal(bytes, &intent); err == nil && intent.Label != "" {
+			intentMap := map[string]interface{}{
+				"label":       intent.Label,
+				"label_name":  intent.LabelName,
+				"description": intent.Description,
+			}
+			result["intents"] = []interface{}{intentMap}
+		} else {
+			// Try as generic map
+			var dataMap map[string]interface{}
+			if err := json.Unmarshal(bytes, &dataMap); err == nil {
+				result = dataMap
+			} else {
+				return nil, fmt.Errorf("failed to transform intent data to findings format: %w", err)
+			}
+		}
+	}
+
+	// Add questions if provided
+	if len(questions) > 0 {
+		result["questions"] = questions
+	}
+
+	return result, nil
+}
+
+// TransformFindingsForRecommendations prepares findings data for recommendations generation
+func (a *Analyzer) TransformFindingsForRecommendations(findingsData interface{}) (map[string]interface{}, error) {
+	result := make(map[string]interface{})
+
+	// Extract findings data
+	switch v := findingsData.(type) {
+	case map[string]interface{}:
+		// If it's already a map, use it directly
+		result = v
+	case []string:
+		// If it's an array of string findings, format appropriately
+		result["findings"] = v
+	default:
+		// For other types, try to marshal and unmarshal
+		bytes, err := json.Marshal(findingsData)
+		if err != nil {
+			return nil, fmt.Errorf("failed to transform findings data: %w", err)
+		}
+
+		if err := json.Unmarshal(bytes, &result); err != nil {
+			return nil, fmt.Errorf("failed to transform findings to recommendations format: %w", err)
+		}
+	}
+
+	// Ensure the result has a findings array for the recommendation engine
+	if _, hasFindings := result["findings"]; !hasFindings {
+		// If we have answers field instead, convert it to findings
+		if answers, ok := result["answers"].([]interface{}); ok {
+			findings := make([]string, 0, len(answers))
+			for _, ans := range answers {
+				if answer, ok := ans.(map[string]interface{}); ok {
+					if text, ok := answer["answer"].(string); ok && text != "" {
+						findings = append(findings, text)
+					}
+				}
+			}
+			result["findings"] = findings
+		}
+	}
+
+	return result, nil
+}
+
+// TransformRecommendationsForPlan prepares recommendations data for action plan generation
+func (a *Analyzer) TransformRecommendationsForPlan(recsData interface{}) (map[string]interface{}, error) {
+	result := make(map[string]interface{})
+
+	// Extract recommendations data
+	switch v := recsData.(type) {
+	case *RecommendationResponse:
+		// If it's already a RecommendationResponse, convert to map
+		bytes, err := json.Marshal(v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal recommendations: %w", err)
+		}
+
+		var recsMap map[string]interface{}
+		if err := json.Unmarshal(bytes, &recsMap); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal recommendations: %w", err)
+		}
+		result["recommendations"] = recsMap
+	case map[string]interface{}:
+		// Check if it has the expected structure
+		if _, hasActions := v["immediate_actions"]; hasActions {
+			// It seems to be a recommendation response
+			result["recommendations"] = v
+		} else if recs, hasRecs := v["recommendations"]; hasRecs {
+			// It has a recommendations field
+			result["recommendations"] = recs
+		} else {
+			// Just use the map and assume it has the needed data
+			result = v
+		}
+	default:
+		// For other types, try to marshal and unmarshal
+		bytes, err := json.Marshal(recsData)
+		if err != nil {
+			return nil, fmt.Errorf("failed to transform recommendations data: %w", err)
+		}
+
+		if err := json.Unmarshal(bytes, &result); err != nil {
+			return nil, fmt.Errorf("failed to transform recommendations to plan format: %w", err)
+		}
+	}
+
+	return result, nil
+}
+
+// TransformPlanForTimeline prepares action plan data for timeline generation
+func (a *Analyzer) TransformPlanForTimeline(planData interface{}, resources map[string]interface{}) (map[string]interface{}, error) {
+	result := make(map[string]interface{})
+
+	// Extract action plan data
+	switch v := planData.(type) {
+	case *ActionPlan:
+		// If it's already an ActionPlan, add it directly
+		result["action_plan"] = v
+	case map[string]interface{}:
+		// Check if it has the expected action plan structure
+		if _, hasGoals := v["goals"]; hasGoals {
+			// It seems to be an action plan
+			result["action_plan"] = v
+		} else if plan, hasPlan := v["action_plan"]; hasPlan {
+			// It has an action_plan field
+			result["action_plan"] = plan
+		} else {
+			// Just use the map and assume it has the needed data
+			result = v
+		}
+	default:
+		// For other types, try to marshal and unmarshal
+		bytes, err := json.Marshal(planData)
+		if err != nil {
+			return nil, fmt.Errorf("failed to transform plan data: %w", err)
+		}
+
+		// Try to unmarshal as ActionPlan
+		var plan ActionPlan
+		if err := json.Unmarshal(bytes, &plan); err == nil && len(plan.Goals) > 0 {
+			result["action_plan"] = plan
+		} else {
+			// Try as generic map
+			var dataMap map[string]interface{}
+			if err := json.Unmarshal(bytes, &dataMap); err == nil {
+				result = dataMap
+			} else {
+				return nil, fmt.Errorf("failed to transform plan data to timeline format: %w", err)
+			}
+		}
+	}
+
+	// Add resources if provided
+	if resources != nil && len(resources) > 0 {
+		result["resources"] = resources
+	}
+
+	return result, nil
+}
