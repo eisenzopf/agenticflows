@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
 	"time"
 
+	"agenticflows/backend/analysis"
 	"agenticflows/backend/db"
 )
 
@@ -247,6 +250,13 @@ func handleWorkflow(w http.ResponseWriter, r *http.Request) {
 		if len(pathParts) > 1 && pathParts[1] == "execution-config" {
 			log.Printf("DEBUG: Handling execution config request for workflow: %s", id)
 			handleWorkflowExecutionConfig(w, r, id)
+			return
+		}
+
+		// Check if it's a request to execute the workflow
+		if len(pathParts) > 1 && pathParts[1] == "execute" {
+			log.Printf("DEBUG: Handling execute request for workflow: %s", id)
+			handleWorkflowExecute(w, r, id)
 			return
 		}
 
@@ -570,4 +580,654 @@ func generateWorkflowExecutionConfig(workflowId string, workflowName string, nod
 		InputTabs:   inputTabsJson,
 		Parameters:  parametersJson,
 	}
+}
+
+// Handle /api/workflows/{id}/execute endpoint
+func handleWorkflowExecute(w http.ResponseWriter, r *http.Request, workflowId string) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse request body
+	var req struct {
+		Parameters map[string]interface{} `json:"parameters"`
+		Data       map[string]interface{} `json:"data"`
+		Text       string                 `json:"text"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid request: %s", err), http.StatusBadRequest)
+		return
+	}
+
+	// Get the workflow from the database
+	workflow, err := db.GetWorkflow(workflowId)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to get workflow: %s", err), http.StatusNotFound)
+		return
+	}
+
+	// Parse the workflow nodes and edges
+	var nodes []map[string]interface{}
+	var edges []map[string]interface{}
+
+	if err := json.Unmarshal([]byte(workflow.Nodes), &nodes); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to parse workflow nodes: %s", err), http.StatusInternalServerError)
+		return
+	}
+
+	if err := json.Unmarshal([]byte(workflow.Edges), &edges); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to parse workflow edges: %s", err), http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Executing workflow '%s' with %d nodes and %d edges", workflow.Name, len(nodes), len(edges))
+
+	// Find all function nodes
+	functionNodes := make([]map[string]interface{}, 0)
+	for _, node := range nodes {
+		data, ok := node["data"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		nodeType, _ := data["nodeType"].(string)
+		if nodeType == "function" {
+			functionNodes = append(functionNodes, node)
+		}
+	}
+
+	// Sort nodes for execution based on dependencies
+	sortedNodes, err := getExecutionOrder(functionNodes, edges)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to determine execution order: %s", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Initialize results storage
+	results := make(map[string]interface{})
+
+	// Add initial data to results
+	if req.Data != nil {
+		for k, v := range req.Data {
+			results[k] = v
+		}
+	}
+
+	// If text was provided, add it to results
+	if req.Text != "" {
+		results["text"] = req.Text
+	}
+
+	// Add any additional parameters
+	if req.Parameters != nil {
+		for k, v := range req.Parameters {
+			results[k] = v
+		}
+	}
+
+	// Execute each node in order
+	for _, node := range sortedNodes {
+		nodeID, _ := node["id"].(string)
+		data, _ := node["data"].(map[string]interface{})
+		functionId, _ := data["functionId"].(string)
+
+		// Skip if no function ID
+		if functionId == "" {
+			continue
+		}
+
+		// Parse the function type from the ID (e.g., "analysis-trends" -> "trends")
+		parts := strings.Split(functionId, "-")
+		if len(parts) < 2 {
+			continue
+		}
+		functionType := parts[1]
+
+		log.Printf("Executing node %s of type %s", nodeID, functionType)
+
+		// Get input data from connected nodes
+		nodeInputs := make(map[string]interface{})
+
+		// Find incoming edges to this node
+		for _, edge := range edges {
+			target, _ := edge["target"].(string)
+			if target != nodeID {
+				continue
+			}
+
+			source, _ := edge["source"].(string)
+			edgeData, hasData := edge["data"].(map[string]interface{})
+
+			// Apply data mappings if defined
+			if hasData && edgeData != nil {
+				mappings, hasMappings := edgeData["mappings"].([]interface{})
+				if hasMappings && mappings != nil {
+					// Get source node results
+					sourceResults, exists := results[source].(map[string]interface{})
+					if !exists {
+						continue
+					}
+
+					// Apply each mapping
+					for _, mappingObj := range mappings {
+						mapping, isMap := mappingObj.(map[string]interface{})
+						if !isMap {
+							continue
+						}
+
+						sourceOutput, _ := mapping["sourceOutput"].(string)
+						targetInput, _ := mapping["targetInput"].(string)
+
+						if sourceOutput != "" && targetInput != "" {
+							// Get the source value from results
+							if sourceValue, exists := sourceResults[sourceOutput]; exists {
+								nodeInputs[targetInput] = sourceValue
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// Merge with global data
+		for k, v := range results {
+			if _, exists := nodeInputs[k]; !exists {
+				nodeInputs[k] = v
+			}
+		}
+
+		// Execute the node based on its function type
+		var nodeResult map[string]interface{}
+
+		switch functionType {
+		case "attributes":
+			// Handle attributes analysis
+			attrResult, err := executeAttributesAnalysis(nodeInputs, workflowId)
+			if err != nil {
+				log.Printf("Error executing attributes analysis: %v", err)
+				results[nodeID] = map[string]interface{}{
+					"error": fmt.Sprintf("Failed to execute attributes analysis: %v", err),
+				}
+				continue
+			}
+			nodeResult = attrResult
+
+		case "intent":
+			// Handle intent analysis
+			intentResult, err := executeIntentAnalysis(nodeInputs, workflowId)
+			if err != nil {
+				log.Printf("Error executing intent analysis: %v", err)
+				results[nodeID] = map[string]interface{}{
+					"error": fmt.Sprintf("Failed to execute intent analysis: %v", err),
+				}
+				continue
+			}
+			nodeResult = intentResult
+
+		case "trends":
+			// Handle trends analysis
+			trendsResult, err := executeTrendsAnalysis(nodeInputs, workflowId)
+			if err != nil {
+				log.Printf("Error executing trends analysis: %v", err)
+				results[nodeID] = map[string]interface{}{
+					"error": fmt.Sprintf("Failed to execute trends analysis: %v", err),
+				}
+				continue
+			}
+			nodeResult = trendsResult
+
+		case "patterns":
+			// Handle patterns analysis
+			patternsResult, err := executePatternsAnalysis(nodeInputs, workflowId)
+			if err != nil {
+				log.Printf("Error executing patterns analysis: %v", err)
+				results[nodeID] = map[string]interface{}{
+					"error": fmt.Sprintf("Failed to execute patterns analysis: %v", err),
+				}
+				continue
+			}
+			nodeResult = patternsResult
+
+		case "findings":
+			// Handle findings analysis
+			findingsResult, err := executeFindingsAnalysis(nodeInputs, workflowId)
+			if err != nil {
+				log.Printf("Error executing findings analysis: %v", err)
+				results[nodeID] = map[string]interface{}{
+					"error": fmt.Sprintf("Failed to execute findings analysis: %v", err),
+				}
+				continue
+			}
+			nodeResult = findingsResult
+
+		case "recommendations":
+			// Handle recommendations
+			recommendationsResult, err := executeRecommendationsAnalysis(nodeInputs, workflowId)
+			if err != nil {
+				log.Printf("Error executing recommendations analysis: %v", err)
+				results[nodeID] = map[string]interface{}{
+					"error": fmt.Sprintf("Failed to execute recommendations analysis: %v", err),
+				}
+				continue
+			}
+			nodeResult = recommendationsResult
+
+		case "plan":
+			// Handle action plan
+			planResult, err := executePlanAnalysis(nodeInputs, workflowId)
+			if err != nil {
+				log.Printf("Error executing plan analysis: %v", err)
+				results[nodeID] = map[string]interface{}{
+					"error": fmt.Sprintf("Failed to execute plan analysis: %v", err),
+				}
+				continue
+			}
+			nodeResult = planResult
+
+		default:
+			log.Printf("Unknown function type: %s", functionType)
+			results[nodeID] = map[string]interface{}{
+				"error": fmt.Sprintf("Unknown function type: %s", functionType),
+			}
+			continue
+		}
+
+		// Store results
+		results[nodeID] = nodeResult
+	}
+
+	// Return the complete workflow results
+	response := map[string]interface{}{
+		"workflow_id":   workflowId,
+		"workflow_name": workflow.Name,
+		"timestamp":     time.Now(),
+		"results":       results,
+	}
+
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding response: %v", err)
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+	}
+}
+
+// getExecutionOrder sorts nodes by dependencies to allow for proper execution order
+func getExecutionOrder(nodes []map[string]interface{}, edges []map[string]interface{}) ([]map[string]interface{}, error) {
+	// Create a map of node dependencies
+	dependencies := make(map[string][]string)
+	nodeMap := make(map[string]map[string]interface{})
+
+	// Initialize with empty dependencies
+	for _, node := range nodes {
+		id, _ := node["id"].(string)
+		if id != "" {
+			dependencies[id] = []string{}
+			nodeMap[id] = node
+		}
+	}
+
+	// Add dependencies based on edges
+	for _, edge := range edges {
+		target, hasTarget := edge["target"].(string)
+		source, hasSource := edge["source"].(string)
+
+		if hasTarget && hasSource && dependencies[target] != nil {
+			dependencies[target] = append(dependencies[target], source)
+		}
+	}
+
+	// Topological sort
+	visited := make(map[string]bool)
+	temp := make(map[string]bool) // For cycle detection
+	result := make([]map[string]interface{}, 0)
+
+	// DFS function for topological sort
+	var dfs func(string) error
+	dfs = func(nodeID string) error {
+		// Skip if already visited
+		if visited[nodeID] {
+			return nil
+		}
+
+		// Check for cycles
+		if temp[nodeID] {
+			return fmt.Errorf("workflow contains cycles, which are not supported")
+		}
+
+		// Mark as temporarily visited
+		temp[nodeID] = true
+
+		// Visit all dependencies first
+		for _, dep := range dependencies[nodeID] {
+			if err := dfs(dep); err != nil {
+				return err
+			}
+		}
+
+		// Mark as visited
+		visited[nodeID] = true
+		temp[nodeID] = false
+
+		// Add to result
+		if node, exists := nodeMap[nodeID]; exists {
+			result = append(result, node)
+		}
+
+		return nil
+	}
+
+	// Start DFS from all nodes
+	for nodeID := range dependencies {
+		if !visited[nodeID] {
+			if err := dfs(nodeID); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// executeAttributesAnalysis performs attributes analysis using the analysis handler
+func executeAttributesAnalysis(inputs map[string]interface{}, workflowID string) (map[string]interface{}, error) {
+	if analysisHandler == nil {
+		return nil, fmt.Errorf("analysis handler not initialized")
+	}
+
+	// Prepare the request
+	req := analysis.StandardAnalysisRequest{
+		AnalysisType: "attributes",
+		WorkflowID:   workflowID,
+		Text:         getStringValue(inputs, "text"),
+		Parameters:   make(map[string]interface{}),
+	}
+
+	// Handle attributes properly - check both direct and nested locations
+	if attributes, ok := inputs["attributes"]; ok {
+		req.Parameters["attributes"] = attributes
+	}
+
+	// Add other parameters
+	if params, ok := inputs["parameters"].(map[string]interface{}); ok {
+		for k, v := range params {
+			req.Parameters[k] = v
+		}
+	}
+
+	// Execute the analysis
+	resp, err := analysisHandler.handleAttributesAnalysis(context.Background(), req)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert to map for consistent return type
+	resultMap := make(map[string]interface{})
+
+	if resp != nil && resp.Results != nil {
+		resultMap = convertToMap(resp.Results)
+	}
+
+	return resultMap, nil
+}
+
+// executeIntentAnalysis performs intent analysis using the analysis handler
+func executeIntentAnalysis(inputs map[string]interface{}, workflowID string) (map[string]interface{}, error) {
+	if analysisHandler == nil {
+		return nil, fmt.Errorf("analysis handler not initialized")
+	}
+
+	// Prepare the request
+	req := analysis.StandardAnalysisRequest{
+		AnalysisType: "intent",
+		WorkflowID:   workflowID,
+		Text:         getStringValue(inputs, "text"),
+		Parameters:   make(map[string]interface{}),
+	}
+
+	// Execute the analysis
+	resp, err := analysisHandler.handleIntentAnalysis(context.Background(), req)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert to map for consistent return type
+	resultMap := make(map[string]interface{})
+
+	if resp != nil && resp.Results != nil {
+		resultMap = convertToMap(resp.Results)
+	}
+
+	return resultMap, nil
+}
+
+// executeTrendsAnalysis performs trends analysis using the analysis handler
+func executeTrendsAnalysis(inputs map[string]interface{}, workflowID string) (map[string]interface{}, error) {
+	if analysisHandler == nil {
+		return nil, fmt.Errorf("analysis handler not initialized")
+	}
+
+	// Prepare the request
+	req := analysis.StandardAnalysisRequest{
+		AnalysisType: "trends",
+		WorkflowID:   workflowID,
+		Text:         getStringValue(inputs, "text"),
+		Data:         inputs,
+		Parameters:   make(map[string]interface{}),
+	}
+
+	// Add focus areas if present
+	if focusAreas, ok := inputs["focusAreas"]; ok {
+		req.Parameters["focus_areas"] = focusAreas
+	}
+
+	// Execute the analysis
+	resp, err := analysisHandler.handleTrendsAnalysis(context.Background(), req)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert to map for consistent return type
+	resultMap := make(map[string]interface{})
+
+	if resp != nil && resp.Results != nil {
+		resultMap = convertToMap(resp.Results)
+	}
+
+	return resultMap, nil
+}
+
+// executePatternsAnalysis performs patterns analysis using the analysis handler
+func executePatternsAnalysis(inputs map[string]interface{}, workflowID string) (map[string]interface{}, error) {
+	if analysisHandler == nil {
+		return nil, fmt.Errorf("analysis handler not initialized")
+	}
+
+	// Prepare the request
+	req := analysis.StandardAnalysisRequest{
+		AnalysisType: "patterns",
+		WorkflowID:   workflowID,
+		Text:         getStringValue(inputs, "text"),
+		Data:         inputs,
+		Parameters:   make(map[string]interface{}),
+	}
+
+	// Add pattern types if present
+	if patternTypes, ok := inputs["patternTypes"]; ok {
+		req.Parameters["pattern_types"] = patternTypes
+	}
+
+	// Execute the analysis
+	resp, err := analysisHandler.handlePatternsAnalysis(context.Background(), req)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert to map for consistent return type
+	resultMap := make(map[string]interface{})
+
+	if resp != nil && resp.Results != nil {
+		resultMap = convertToMap(resp.Results)
+	}
+
+	return resultMap, nil
+}
+
+// executeFindingsAnalysis performs findings analysis using the analysis handler
+func executeFindingsAnalysis(inputs map[string]interface{}, workflowID string) (map[string]interface{}, error) {
+	if analysisHandler == nil {
+		return nil, fmt.Errorf("analysis handler not initialized")
+	}
+
+	// Prepare the request
+	req := analysis.StandardAnalysisRequest{
+		AnalysisType: "findings",
+		WorkflowID:   workflowID,
+		Text:         getStringValue(inputs, "text"),
+		Data:         inputs,
+		Parameters:   make(map[string]interface{}),
+	}
+
+	// Extract questions from the inputs
+	if questionsRaw, ok := inputs["questions"]; ok {
+		req.Parameters["questions"] = questionsRaw
+	}
+
+	// Execute the analysis
+	resp, err := analysisHandler.handleFindingsAnalysis(context.Background(), req)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert to map for consistent return type
+	resultMap := make(map[string]interface{})
+
+	if resp != nil && resp.Results != nil {
+		resultMap = convertToMap(resp.Results)
+	}
+
+	return resultMap, nil
+}
+
+// executeRecommendationsAnalysis performs recommendations analysis using the analysis handler
+func executeRecommendationsAnalysis(inputs map[string]interface{}, workflowID string) (map[string]interface{}, error) {
+	if analysisHandler == nil {
+		return nil, fmt.Errorf("analysis handler not initialized")
+	}
+
+	// Prepare the request
+	req := analysis.StandardAnalysisRequest{
+		AnalysisType: "recommendations",
+		WorkflowID:   workflowID,
+		Text:         getStringValue(inputs, "text"),
+		Data:         inputs,
+		Parameters:   make(map[string]interface{}),
+	}
+
+	// Add focus area if present
+	if focusArea, ok := inputs["focusArea"]; ok {
+		req.Parameters["focus_area"] = focusArea
+	}
+
+	// Add criteria if present
+	if criteria, ok := inputs["criteria"]; ok {
+		req.Parameters["criteria"] = criteria
+	}
+
+	// Execute the analysis
+	resp, err := analysisHandler.handleRecommendationsAnalysis(context.Background(), req)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert to map for consistent return type
+	resultMap := make(map[string]interface{})
+
+	if resp != nil && resp.Results != nil {
+		resultMap = convertToMap(resp.Results)
+	}
+
+	return resultMap, nil
+}
+
+// executePlanAnalysis performs action plan analysis using the analysis handler
+func executePlanAnalysis(inputs map[string]interface{}, workflowID string) (map[string]interface{}, error) {
+	if analysisHandler == nil {
+		return nil, fmt.Errorf("analysis handler not initialized")
+	}
+
+	// Prepare the request
+	req := analysis.StandardAnalysisRequest{
+		AnalysisType: "plan",
+		WorkflowID:   workflowID,
+		Text:         getStringValue(inputs, "text"),
+		Data:         inputs,
+		Parameters:   make(map[string]interface{}),
+	}
+
+	// Add recommendations if present
+	if recommendations, ok := inputs["recommendations"]; ok {
+		req.Parameters["recommendations"] = recommendations
+	}
+
+	// Add timeline requirements if present
+	if timeline, ok := inputs["timeline"]; ok {
+		req.Parameters["timeline"] = timeline
+	}
+
+	// Execute the analysis
+	resp, err := analysisHandler.handlePlanAnalysis(context.Background(), req)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert to map for consistent return type
+	resultMap := make(map[string]interface{})
+
+	if resp != nil && resp.Results != nil {
+		resultMap = convertToMap(resp.Results)
+	}
+
+	return resultMap, nil
+}
+
+// Helper function to get a string value from a map
+func getStringValue(m map[string]interface{}, key string) string {
+	if val, ok := m[key]; ok {
+		if strVal, ok := val.(string); ok {
+			return strVal
+		}
+	}
+	return ""
+}
+
+// Helper function to convert an interface{} to a map
+func convertToMap(data interface{}) map[string]interface{} {
+	if data == nil {
+		return make(map[string]interface{})
+	}
+
+	// If it's already a map, return it
+	if m, ok := data.(map[string]interface{}); ok {
+		return m
+	}
+
+	// Otherwise, try to marshal and unmarshal to convert
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return map[string]interface{}{
+			"error": fmt.Sprintf("Failed to marshal data: %v", err),
+		}
+	}
+
+	result := make(map[string]interface{})
+	if err := json.Unmarshal(jsonData, &result); err != nil {
+		return map[string]interface{}{
+			"error": fmt.Sprintf("Failed to unmarshal data: %v", err),
+		}
+	}
+
+	return result
 }

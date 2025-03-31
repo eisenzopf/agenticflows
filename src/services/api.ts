@@ -350,22 +350,27 @@ export const api = {
     workflowId?: string
   ): Promise<any> => {
     try {
-      // Create request object with analysis type and parameters
-      const request: {
-        analysis_type: string;
-        parameters: Record<string, any>;
-        workflow_id?: string;
-        text?: string;
-        data?: Record<string, any>;
-      } = {
-        analysis_type: analysisType,
-        parameters: parameters
+      // Create request object with analysis type
+      const request: Record<string, any> = {
+        analysis_type: analysisType
       };
+      
+      // Add parameters or attributes directly based on what's provided
+      if (parameters) {
+        // For attributes analysis, handle the attributes array directly
+        if (analysisType === 'attributes' && parameters.attributes) {
+          request.attributes = parameters.attributes; 
+        } else {
+          request.parameters = parameters;
+        }
+      }
       
       // Add optional fields if provided
       if (workflowId) request.workflow_id = workflowId;
       if (text) request.text = text;
       if (data) request.data = data;
+      
+      console.log(`Sending ${analysisType} request:`, JSON.stringify(request, null, 2));
       
       // Make the API call to the unified endpoint
       const response = await fetch(`${API_URL}/analysis`, {
@@ -416,87 +421,26 @@ export const api = {
   // Execute a workflow of connected functions
   executeWorkflow: async (workflowId: string, inputData: Record<string, any> = {}): Promise<any> => {
     try {
-      // Get the workflow definition
-      const workflow = await api.getWorkflow(workflowId);
+      console.log(`Executing workflow ${workflowId} with input data:`, inputData);
       
-      if (!workflow || !workflow.nodes || !workflow.edges) {
-        throw new Error('Invalid workflow');
+      // Call the backend API to execute the workflow
+      const response = await fetch(`${API_URL}/workflows/${workflowId}/execute`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          data: inputData,
+          text: inputData.text,
+          parameters: inputData.parameters
+        }),
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Failed to execute workflow: ${response.statusText}`);
       }
       
-      // Parse nodes and edges if they're strings
-      const nodes: WorkflowNode[] = Array.isArray(workflow.nodes) 
-        ? workflow.nodes 
-        : (typeof workflow.nodes === 'string' ? JSON.parse(workflow.nodes) : []);
-        
-      const edges: WorkflowEdge[] = Array.isArray(workflow.edges) 
-        ? workflow.edges 
-        : (typeof workflow.edges === 'string' ? JSON.parse(workflow.edges) : []);
-      
-      // Find all function nodes
-      const functionNodes = nodes.filter(node => node.data?.nodeType === 'function');
-      
-      // Sort nodes into a dependency order for execution
-      const sortedNodes = getExecutionOrder(functionNodes, edges);
-      
-      // Initialize results storage
-      let results: Record<string, any> = { ...inputData };
-      
-      // Execute each node in order
-      for (const node of sortedNodes) {
-        const functionId = node.data?.functionId;
-        const functionType = functionId?.split('-')[1] || '';
-        
-        // Get the incoming edges for this node
-        const incomingEdges = edges.filter(edge => edge.target === node.id);
-        
-        // Prepare function parameters from edge mappings
-        const parameters: Record<string, any> = {};
-        let inputData: Record<string, any> = {};
-        
-        // Process each incoming edge to get inputs
-        for (const edge of incomingEdges) {
-          const mappings = edge.data?.mappings || [];
-          const sourceNodeId = edge.source;
-          
-          // Get results from the source node
-          const sourceResults = results[sourceNodeId];
-          
-          if (sourceResults) {
-            // Apply the mappings
-            for (const mapping of mappings) {
-              if (mapping && sourceResults[mapping.sourceOutput]) {
-                inputData[mapping.targetInput] = sourceResults[mapping.sourceOutput];
-              }
-            }
-          }
-        }
-        
-        // Merge with initial data if needed
-        inputData = { ...inputData, ...results };
-        
-        // Execute the function based on its type
-        let functionResult;
-        try {
-          functionResult = await api.performAnalysis(
-            functionType,
-            parameters,
-            inputData,
-            inputData.text,
-            workflowId
-          );
-          
-          // Store the results indexed by node id
-          results[node.id] = functionResult.results || {};
-        } catch (error) {
-          console.error(`Error executing function node ${node.id}:`, error);
-          results[node.id] = { error: `Failed to execute: ${error}` };
-        }
-      }
-      
-      return {
-        workflow_id: workflowId,
-        results
-      };
+      return response.json();
     } catch (error) {
       console.error('Error executing workflow:', error);
       throw error;

@@ -142,7 +142,7 @@ export default function WorkflowInputForm({ workflowId, onSubmit, onClose }: Wor
         const dbSource: DataSourceConfig = {
           id: 'databaseSource',
           name: 'SQLite Database',
-          description: 'Use a SQLite database file for dispute analysis',
+          description: 'Use a SQLite database with conversation data',
           fields: [
             {
               id: 'dbPath',
@@ -150,25 +150,25 @@ export default function WorkflowInputForm({ workflowId, onSubmit, onClose }: Wor
               type: 'text' as 'text',
               placeholder: '/path/to/your/database.db',
               defaultValue: '',
-              description: 'Path to the SQLite database file to analyze',
+              description: 'Path to the SQLite database file',
               required: true
             },
             {
-              id: 'maxDisputes',
-              label: 'Maximum Disputes',
+              id: 'maxConversations',
+              label: 'Maximum Conversations',
               type: 'number' as 'number',
               placeholder: '100',
               defaultValue: '100',
-              description: 'Maximum number of disputes to analyze',
+              description: 'Maximum number of conversations to analyze',
               required: false
             },
             {
               id: 'conversationLimit',
-              label: 'Conversation Limit',
+              label: 'Example Limit',
               type: 'number' as 'number',
               placeholder: '5',
               defaultValue: '5',
-              description: 'Number of example conversations to include',
+              description: 'Number of example conversations to include in output',
               required: false
             }
           ]
@@ -197,138 +197,96 @@ export default function WorkflowInputForm({ workflowId, onSubmit, onClose }: Wor
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Prepare data for workflow execution
-    const data: Record<string, any> = {
-      parameters: {},
-      dataSources: {}
-    };
-    
-    // Add parameters
-    if (workflowConfig) {
-      workflowConfig.parameters.forEach(paramGroup => {
-        paramGroup.fields.forEach(field => {
-          if (formValues[field.id] !== undefined) {
-            data.parameters[field.id] = formValues[field.id];
-          }
-        });
-      });
-      
-      // Add data from selected data sources
-      workflowConfig.inputTabs.forEach(tab => {
-        tab.dataSourceConfigs.forEach(dataSource => {
-          if (selectedDataSources[dataSource.id]) {
-            // This data source is selected
-            const sourceData: Record<string, any> = {};
-            
-            dataSource.fields.forEach(field => {
-              const fieldId = `${dataSource.id}_${field.id}`;
-              if (formValues[fieldId] !== undefined) {
-                sourceData[field.id] = formValues[fieldId];
-              }
-            });
-            
-            data.dataSources[dataSource.id] = sourceData;
-            
-            // Special handling for database source to match analyze_fee_disputes script
-            if (dataSource.id === 'databaseSource') {
-              const dbPath = formValues[`databaseSource_dbPath`];
-              const maxDisputes = parseInt(formValues[`databaseSource_maxDisputes`] || '100');
-              const conversationLimit = parseInt(formValues[`databaseSource_conversationLimit`] || '5');
-              const batchSize = parseInt(formValues.batchSize || '10');
-              const enableDebug = !!formValues.enableDebug;
-              
-              // Format for API in the same structure as the Go script
-              data.dbConfig = {
-                dbPath,
-                maxDisputes,
-                conversationLimit,
-                batchSize,
-                enableDebug,
-                workflowId: workflowId || '',
-              };
-              
-              // Add the SQLite query parameters that are used in the script
-              data.sqlQueries = {
-                disputesQuery: `
-                SELECT 
-                  conversation_id,
-                  text,
-                  COALESCE(date_time, CURRENT_TIMESTAMP) as date_time
-                FROM conversations
-                WHERE text IS NOT NULL 
-                AND LENGTH(text) > 100
-                AND (
-                  text LIKE '%fee%'
-                  OR text LIKE '%charge%'
-                  OR text LIKE '%billing%'
-                  OR text LIKE '%refund%'
-                  OR text LIKE '%dispute%'
-                )
-                ORDER BY RANDOM()
-                LIMIT ?
-                `,
-                conversationsQuery: `
-                SELECT 
-                  conversation_id,
-                  text,
-                  COALESCE(date_time, CURRENT_TIMESTAMP) as date_time
-                FROM conversations
-                WHERE text IS NOT NULL 
-                AND LENGTH(text) > 200
-                ORDER BY RANDOM()
-                LIMIT ?
-                `
-              };
-              
-              // Advanced parameters
-              if (formValues.focusAreas) {
-                data.focusAreas = formValues.focusAreas.split(',').map((item: string) => item.trim());
-              }
-              
-              if (formValues.patternTypes) {
-                data.patternTypes = formValues.patternTypes.split(',').map((item: string) => item.trim());
-              }
-            }
-          }
-        });
-      });
+    // Get conversation text from manual input if selected
+    let conversationText = '';
+    if (formValues.conversationText || (formValues.manualInput_conversationText && selectedDataSources.manualInput)) {
+      // Get the conversation text from either old format or new format
+      conversationText = formValues.conversationText || formValues.manualInput_conversationText;
     }
     
-    // Add backward compatibility for old code
-    if (formValues.disputeText || (formValues.manualInput_disputeText && selectedDataSources.manualInput)) {
-      // Get the dispute text from either old format or new format
-      const disputeText = formValues.disputeText || formValues.manualInput_disputeText;
-      const disputeAmount = formValues.disputeAmount || formValues.manualInput_disputeAmount;
-      const disputeCount = formValues.disputeCount || formValues.manualInput_disputeCount;
-      
-      data.text = disputeText;
-      
-      if (disputeAmount) {
-        const amount = parseFloat(disputeAmount);
-        if (!isNaN(amount)) {
-          data.disputes = [{
-            id: 'generated-dispute-1',
-            text: disputeText,
-            amount: amount,
+    // If no conversation text was provided, use a sample
+    if (!conversationText) {
+      conversationText = "This is a sample conversation about a customer service interaction. The customer was asking about order status and delivery timeframe. The agent was able to provide the expected delivery date and helped track the package.";
+    }
+    
+    // Prepare questions list from form input
+    const questions = formValues.questions 
+      ? formValues.questions.split('\n').filter((q: string) => q.trim().length > 0)
+      : ['What is the main topic?', 'What is the customer sentiment?', 'What are the key points?'];
+    
+    // Define default attributes
+    const defaultAttributes = [
+      {
+        field_name: "topic",
+        title: "Topic",
+        description: "Main topic of the conversation"
+      },
+      {
+        field_name: "sentiment",
+        title: "Sentiment",
+        description: "Overall sentiment of the conversation"
+      },
+      {
+        field_name: "key_points",
+        title: "Key Points",
+        description: "Important points mentioned in the conversation"
+      }
+    ];
+    
+    // Add question-based attributes
+    const questionAttributes = questions.map((question: string, index: number) => ({
+      field_name: `question_${index + 1}`,
+      title: `Question ${index + 1}`,
+      description: question
+    }));
+    
+    // Combine all attributes
+    const allAttributes = [...defaultAttributes, ...questionAttributes];
+    
+    // Determine if we're inside a workflow with specific node types
+    const hasWorkflowId = !!workflowId;
+    
+    // Create the appropriate request based on context
+    let finalData: Record<string, any>;
+    
+    if (hasWorkflowId) {
+      // We're in a workflow context, so include whatever the workflow nodes need
+      finalData = {
+        // Add the user-provided data 
+        text: conversationText,
+        
+        // Include attributes at the root level for any direct attributes analysis
+        attributes: allAttributes,
+        
+        // Add additional structured data for the server-side execution
+        data: {
+          text: conversationText,
+          conversations: [{
+            id: 'manual-input-1',
+            text: conversationText,
             created_at: new Date().toISOString()
-          }];
+          }]
+        },
+        
+        // Also include parameters for backward compatibility
+        parameters: {
+          attributes: allAttributes,
+          questions: questions
         }
-      }
-      
-      if (disputeCount) {
-        const count = parseInt(disputeCount);
-        if (!isNaN(count)) {
-          data.count = count;
-          data.attributes = {
-            dispute_count: count,
-            avg_amount: parseFloat(disputeAmount) || 0,
-            dispute_timespan: '3 months'
-          };
-        }
-      }
+      };
+    } else {
+      // Direct API call (not in workflow)
+      finalData = {
+        analysis_type: "attributes",
+        text: conversationText,
+        attributes: allAttributes
+      };
     }
     
-    onSubmit(data);
+    // Log the data being sent
+    console.log("Submitting workflow data:", JSON.stringify(finalData, null, 2));
+    
+    onSubmit(finalData);
   };
   
   // Render a single input field based on its type
@@ -493,8 +451,8 @@ export default function WorkflowInputForm({ workflowId, onSubmit, onClose }: Wor
   const getDefaultWorkflowConfig = (): WorkflowConfig => {
     return {
       id: 'default',
-      name: 'Default Workflow',
-      description: 'A simple workflow for dispute analysis',
+      name: 'Conversation Analysis Workflow',
+      description: 'Configure data sources and analysis parameters',
       inputTabs: [
         {
           id: 'basicData',
@@ -503,33 +461,33 @@ export default function WorkflowInputForm({ workflowId, onSubmit, onClose }: Wor
             {
               id: 'databaseSource',
               name: 'SQLite Database',
-              description: 'Use a SQLite database file for dispute analysis',
+              description: 'Use a SQLite database with conversation data',
               fields: [
                 {
                   id: 'dbPath',
                   label: 'Database Path',
-                  type: 'text',
+                  type: 'text' as 'text',
                   placeholder: '/path/to/your/database.db',
                   defaultValue: '',
-                  description: 'Path to the SQLite database file to analyze',
+                  description: 'Path to the SQLite database file',
                   required: true
                 },
                 {
-                  id: 'maxDisputes',
-                  label: 'Maximum Disputes',
-                  type: 'number',
+                  id: 'maxConversations',
+                  label: 'Maximum Conversations',
+                  type: 'number' as 'number',
                   placeholder: '100',
                   defaultValue: '100',
-                  description: 'Maximum number of disputes to analyze',
+                  description: 'Maximum number of conversations to analyze',
                   required: false
                 },
                 {
                   id: 'conversationLimit',
-                  label: 'Conversation Limit',
-                  type: 'number',
+                  label: 'Example Limit',
+                  type: 'number' as 'number',
                   placeholder: '5',
                   defaultValue: '5',
-                  description: 'Number of example conversations to include',
+                  description: 'Number of example conversations to include in output',
                   required: false
                 }
               ]
@@ -537,30 +495,15 @@ export default function WorkflowInputForm({ workflowId, onSubmit, onClose }: Wor
             {
               id: 'manualInput',
               name: 'Manual Input',
-              description: 'Enter dispute information manually',
+              description: 'Enter conversation data manually',
               fields: [
                 {
-                  id: 'disputeText',
-                  label: 'Example Dispute Text',
-                  type: 'textarea',
-                  placeholder: 'I was charged a $35 overdraft fee but I had sufficient funds in my account.',
+                  id: 'conversationText',
+                  label: 'Conversation Text',
+                  type: 'textarea' as 'textarea',
+                  placeholder: 'Enter conversation text here...',
                   defaultValue: '',
-                  required: true
-                },
-                {
-                  id: 'disputeAmount',
-                  label: 'Dispute Amount ($)',
-                  type: 'number',
-                  placeholder: '35.00',
-                  defaultValue: '',
-                  required: true
-                },
-                {
-                  id: 'disputeCount',
-                  label: 'Number of Disputes',
-                  type: 'number',
-                  placeholder: '10',
-                  defaultValue: '10',
+                  description: 'Paste one or more conversations to analyze',
                   required: true
                 }
               ]
@@ -571,43 +514,52 @@ export default function WorkflowInputForm({ workflowId, onSubmit, onClose }: Wor
       parameters: [
         {
           id: 'analysisParams',
-          label: 'Analysis Parameters',
+          label: 'Analysis Settings',
           fields: [
             {
               id: 'batchSize',
               label: 'Batch Size',
-              type: 'number',
-              description: 'Number of disputes to process in each batch',
+              type: 'number' as 'number',
+              description: 'Number of items to process in each batch',
               defaultValue: '10',
               required: false
             },
             {
               id: 'enableDebug',
               label: 'Enable Debug Mode',
-              type: 'checkbox',
+              type: 'checkbox' as 'checkbox',
               defaultValue: false,
               required: false
             }
           ]
         },
         {
-          id: 'feeDisputeParams',
-          label: 'Fee Dispute Analysis',
+          id: 'questionParams',
+          label: 'Analysis Questions',
           fields: [
             {
+              id: 'questions',
+              label: 'Questions to Answer',
+              type: 'textarea' as 'textarea',
+              description: 'Enter questions for the analysis (one per line)',
+              placeholder: 'What are the common patterns?\nWhat recommendations can be made?',
+              defaultValue: 'What are the most common topics discussed?\nWhat patterns can be identified?\nWhat are the key areas for improvement?\nWhat recommendations would you suggest?',
+              required: true
+            },
+            {
               id: 'focusAreas',
-              label: 'Focus Areas',
-              type: 'text',
+              label: 'Focus Areas (Optional)',
+              type: 'text' as 'text',
               description: 'Comma-separated list of areas to focus on',
-              defaultValue: 'fee_dispute_trends,customer_impact,financial_impact',
+              defaultValue: 'customer_satisfaction,response_time,resolution_effectiveness',
               required: false
             },
             {
               id: 'patternTypes',
-              label: 'Pattern Types',
-              type: 'text',
+              label: 'Pattern Types (Optional)',
+              type: 'text' as 'text',
               description: 'Comma-separated list of pattern types to identify',
-              defaultValue: 'fee_dispute_patterns,resolution_patterns,customer_behavior_patterns',
+              defaultValue: 'conversation_flow,resolution_patterns,customer_behavior',
               required: false
             }
           ]
@@ -710,7 +662,7 @@ export default function WorkflowInputForm({ workflowId, onSubmit, onClose }: Wor
                           <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-md mb-3 text-sm">
                             <h4 className="font-medium text-blue-800 dark:text-blue-300 mb-1">Using SQLite Database</h4>
                             <p className="text-blue-700 dark:text-blue-400 mb-2">
-                              This option allows you to analyze fee disputes from a SQLite database, similar to how the command-line tool works.
+                              This option allows you to analyze conversations from a SQLite database.
                             </p>
                             <div className="text-xs text-blue-600 dark:text-blue-400">
                               <p className="mb-1"><strong>Expected Database Schema:</strong> The database should have a <code>conversations</code> table with at least these columns:</p>

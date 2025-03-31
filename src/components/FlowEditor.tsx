@@ -413,16 +413,28 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
       // Save the workflow first
       await handleSaveWorkflow();
       
-      // Execute the workflow
+      // Get workflow config if needed
+      if (!workflowConfig) {
+        try {
+          const config = await api.getWorkflowExecutionConfig(activeWorkflowId);
+          setWorkflowConfig(config);
+        } catch (error) {
+          console.warn("Could not load workflow config:", error);
+        }
+      }
+      
+      console.log("Executing workflow on backend with data:", initialData);
+      
+      // Execute the workflow using the backend API
       const results = await api.executeWorkflow(activeWorkflowId, initialData);
       
       // Update state with results
       setExecutionResults(results);
       setShowResultsViewer(true);
       
-      // Apply visual indicators for successful nodes
+      // Apply visual indicators for successful nodes based on node IDs in results
       const updatedNodes = nodes.map(node => {
-        if (results.results[node.id]) {
+        if (results.results && results.results[node.id]) {
           // Node was executed successfully
           return {
             ...node,
@@ -436,12 +448,13 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
             }
           };
         } else if (node.data?.nodeType === 'function') {
-          // Function node but not executed
+          // Function node but not executed or failed
+          const hasError = results.results?.[node.id]?.error;
           return {
             ...node,
             style: {
               ...node.style,
-              boxShadow: '0 0 0 2px gray'
+              boxShadow: hasError ? '0 0 0 2px red' : '0 0 0 2px gray'
             }
           };
         }
@@ -457,7 +470,7 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
     } finally {
       setIsExecuting(false);
     }
-  }, [activeWorkflowId, handleSaveWorkflow, nodes, setNodes]);
+  }, [activeWorkflowId, handleSaveWorkflow, nodes, setNodes, workflowConfig]);
 
   // Expose methods to the parent component
   useImperativeHandle(ref, () => ({
@@ -658,7 +671,7 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
           firstTab.dataSourceConfigs.unshift({
             id: 'databaseSource',
             name: 'SQLite Database',
-            description: 'Use a SQLite database file for dispute analysis',
+            description: 'Use a SQLite database with conversation data',
             fields: [
               {
                 id: 'dbPath',
@@ -666,30 +679,53 @@ const FlowEditor = forwardRef<FlowEditorHandle, {}>((props, ref) => {
                 type: 'text',
                 placeholder: '/path/to/your/database.db',
                 defaultValue: '',
-                description: 'Path to the SQLite database file to analyze',
+                description: 'Path to the SQLite database file',
                 required: true
               },
               {
-                id: 'maxDisputes',
-                label: 'Maximum Disputes',
+                id: 'maxConversations',
+                label: 'Maximum Conversations',
                 type: 'number',
                 placeholder: '100',
                 defaultValue: '100',
-                description: 'Maximum number of disputes to analyze',
+                description: 'Maximum number of conversations to analyze',
                 required: false
               },
               {
                 id: 'conversationLimit',
-                label: 'Conversation Limit',
+                label: 'Example Limit',
                 type: 'number',
                 placeholder: '5',
                 defaultValue: '5',
-                description: 'Number of example conversations to include',
+                description: 'Number of example conversations to include in output',
                 required: false
               }
             ]
           });
         }
+      }
+      
+      // Ensure we have a Questions section
+      const hasQuestionsParam = workflowConfig.parameters?.some((param: {id: string}) => 
+        param.id === 'questionParams'
+      );
+      
+      if (!hasQuestionsParam && workflowConfig.parameters) {
+        workflowConfig.parameters.push({
+          id: 'questionParams',
+          label: 'Analysis Questions',
+          fields: [
+            {
+              id: 'questions',
+              label: 'Questions to Answer',
+              type: 'textarea',
+              description: 'Enter questions for the analysis (one per line)',
+              placeholder: 'What are the common patterns?\nWhat recommendations can be made?',
+              defaultValue: 'What are the most common topics discussed?\nWhat patterns can be identified?\nWhat are the key areas for improvement?\nWhat recommendations would you suggest?',
+              required: true
+            }
+          ]
+        });
       }
     }
     
