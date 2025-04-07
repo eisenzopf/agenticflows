@@ -32,15 +32,6 @@ This package provides Go implementations of contact center analysis functionalit
 
 - `/api/analysis` - Unified endpoint for all analysis operations using a standardized request/response format
 
-### Legacy Endpoints
-
-- `/api/analysis/trends` - Analyze trends in conversation data
-- `/api/analysis/patterns` - Identify patterns in conversation data
-- `/api/analysis/findings` - Analyze findings from attribute extraction
-- `/api/analysis/attributes` - Extract or generate attributes from text
-- `/api/analysis/intent` - Identify the primary intent in a conversation
-- `/api/analysis/results` - Retrieve stored analysis results
-
 ## Standardized API Usage
 
 The standardized API uses a unified request/response format to make analysis operations more consistent and chainable.
@@ -174,17 +165,20 @@ timelineResp, err := client.PerformAnalysis(timelineReq)
 Use the included test clients to test the API:
 
 ```bash
-# Test the standardized API
-go run cmd/examples/standardized_client.go -text "I want to cancel my subscription" -debug
+# Test intent analysis with standardized API
+go run cmd/testclient/main.go -type intent -text "I want to cancel my subscription"
 
-# Test legacy endpoints
-go run cmd/testclient/main.go -endpoint intent -text "I want to cancel my subscription"
+# Test attribute extraction 
+go run cmd/testclient/main.go -type attributes -text "I'm having issues with my latest bill"
 
-# Process a file
-go run cmd/testclient/main.go -endpoint attributes -file ./sample.txt
+# Test recommendations generation
+go run cmd/testclient/main.go -type recommendations -text "Our customers frequently complain about long wait times"
+
+# Process a file for trend analysis
+go run cmd/testclient/main.go -type trends -file ./sample.txt
 
 # View results for a workflow
-go run cmd/testclient/main.go -endpoint results -workflow abc123
+go run cmd/testclient/main.go -results -workflow abc123
 ```
 
 ### Library Usage

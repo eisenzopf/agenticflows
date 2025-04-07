@@ -1,5 +1,8 @@
 # Conversation Analysis Example Scripts
 
+_Last Updated: [Current Date]_
+_Version: 1.0.1_
+
 This directory contains a collection of Go scripts that demonstrate how to use the Discourse AI Analysis API for conversation analysis. These scripts replicate the functionality of the original Python scripts but utilize the new Go API endpoints.
 
 ## Scripts Overview
@@ -12,6 +15,7 @@ This directory contains a collection of Go scripts that demonstrate how to use t
 | `identify_attributes.go` | Identifies potential attributes definitions from conversations | `/api/analysis/attributes` |
 | `match_intents.go` | Matches and evaluates intent classifications | `/api/analysis/intent` |
 | `analyze_fee_disputes.go` | Analyzes fee dispute conversations with detailed analytics | `/api/analysis/attributes`, `/api/analysis/trends`, `/api/analysis/findings` |
+| `create_action_plan.go` | Generates actionable recommendations based on analysis | `/api/analysis/recommendations` |
 
 ## Utility Files
 
@@ -22,6 +26,14 @@ This directory contains a collection of Go scripts that demonstrate how to use t
 | `SCRIPT_USAGE.md` | Detailed instructions on using the shell script |
 | `PIPELINE_OVERVIEW.md` | Overview of how the scripts work together in a pipeline |
 | `MOCK_DATA_USAGE.md` | Instructions for using scripts with mock data instead of a database |
+
+## Prerequisites
+
+- Go 1.18 or later
+- SQLite database with conversation data (or use mock data option)
+- Discourse AI Analysis API server (v1.0 or later)
+- jq (optional, for pretty-printing JSON output)
+- curl (for API testing)
 
 ## Getting Started
 
@@ -40,13 +52,19 @@ See `SCRIPT_USAGE.md` for detailed instructions and options.
 
 ## Using Mock Data
 
-You can now run the example scripts without a database by using mock data:
+You can now run many of the example scripts without a database by using mock data:
 
 ```bash
 ./run_examples.sh -m all
 ```
 
-This uses predefined sample data instead of querying a database. Currently, only some scripts support mock data. See `MOCK_DATA_USAGE.md` for more details.
+This uses predefined sample data instead of querying a database. Currently, the following scripts support mock data:
+- `generate_intents.go`
+- `create_action_plan.go`
+- `generate_attributes.go`
+- `identify_attributes.go`
+
+See `MOCK_DATA_USAGE.md` for more details on using and extending mock data support.
 
 ## Script Functionality
 
@@ -68,6 +86,9 @@ Evaluates intent classification against known intents, calculating precision, re
 ### analyze_fee_disputes.go
 Performs detailed analysis on fee dispute conversations, extracting specific patterns and insights. Uses multiple endpoints including `/api/analysis/attributes`, `/api/analysis/trends`, and `/api/analysis/findings`.
 
+### create_action_plan.go
+Generates actionable recommendations based on intent groups and attribute data, creating a prioritized action plan. Uses the `/api/analysis/recommendations` endpoint.
+
 ## API Integration
 
 All scripts use the common `ApiClient` defined in `utils.go` to interact with the Discourse AI Analysis API. The client handles:
@@ -80,6 +101,16 @@ All scripts use the common `ApiClient` defined in `utils.go` to interact with th
 
 The client connects to the API server at `http://localhost:8080/api/analysis` by default.
 
+### API Versioning
+
+The current scripts work with API v1.0. The API versioning is handled as follows:
+
+- Base URL format: `http://localhost:8080/api/v1/analysis`
+- Version header: `X-API-Version: 1.0`
+- Compatibility: Scripts will warn if connecting to an incompatible API version
+
+When a new API version is released, the scripts will be updated to maintain compatibility.
+
 ## Database Integration
 
 The scripts read conversation data from a SQLite database. The database schema is expected to have tables containing conversations with at least the following fields:
@@ -91,4 +122,30 @@ Some scripts like `generate_intents.go` and `generate_attributes.go` can also sa
 
 ## Output Format
 
-All scripts produce JSON output files containing the results of their analysis, saved to the specified output directory. 
+All scripts produce JSON output files containing the results of their analysis, saved to the specified output directory.
+
+## Troubleshooting
+
+Common issues and their solutions:
+
+### API Connection Issues
+- Ensure the API server is running at the expected URL
+- Check network connectivity and firewall settings
+- Verify API authorization if enabled
+
+### Database Errors
+- Confirm the database path is correct
+- Ensure the database has the expected schema
+- Check database permissions
+
+### Script Execution Problems
+- Ensure Go version 1.18+ is installed
+- Make sure the run_examples.sh script is executable
+- Check for missing dependencies
+
+### Mock Data Issues
+- Verify the script supports mock data (see list above)
+- Ensure -m flag is used correctly
+- Check the mock data implementation in the script
+
+For more detailed troubleshooting, run scripts with the `-v` (verbose) flag. 

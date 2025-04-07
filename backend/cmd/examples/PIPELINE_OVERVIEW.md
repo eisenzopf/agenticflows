@@ -1,10 +1,33 @@
 # Conversation Analysis Pipeline Overview
 
+_Last Updated: [Current Date]_
+_Version: 1.0.1_
+
 This document explains how the various example scripts work together to form a comprehensive conversation analysis pipeline.
 
 ## The Complete Analysis Pipeline
 
-![Analysis Pipeline Flow](https://mermaid.ink/img/pako:eNp1kc1qwzAQhF9FaNBCCn6AWDm0JG1KenBoD6IXxa5sy8iSkRU3IeTdK8eGJoWeLM3Ozn47cFJJRYiJrm77N1hWvTY9Z0hllmqQFSvOWWYqwWutuElkXWQnQnQbGxN5F_RbzJAZ8wDwEhRUNJyJ1f0-HF_hLYy1hTl4t_ZefzXWbgcVHSCLnc1rqDBvXj8Xe4kKoLkTPf4TFOFDgbKbHkexvw4kcAQVR0QfcSf46dPVgaMqbOHoGl61MKK2TZs4KjXVpH89U3_FZGh8MvPcZFzyvS5y9xqBP6Uaag8n0TiJCLUeSIdQpX0x-nT8N0_RbVQkYSZGrSSFpHCsJh9LjcYkWo-ZCDMo-Y-HdwxZMIhPTBQ8ZFRpDrXzXfmYfQP_nI6D)
+```mermaid
+graph TD
+    A[Raw Conversations] --> B[generate_intents.go]
+    B --> C[Intent Classifications]
+    C --> D[group_intents.go]
+    C --> E[identify_attributes.go]
+    D --> F[Intent Groups]
+    E --> G[Attribute Definitions]
+    G --> H[generate_attributes.go]
+    C --> H
+    H --> I[Structured Attributes]
+    C --> J[match_intents.go]
+    J --> K[Intent Matching Results]
+    I --> L[analyze_fee_disputes.go]
+    L --> M[Fee Dispute Analysis]
+    F --> N[create_action_plan.go]
+    I --> N
+    N --> O[Action Plan]
+```
+
+Note: Please open this file in a Markdown viewer that supports Mermaid diagrams to view the pipeline visualization.
 
 ## Pipeline Steps
 
@@ -50,6 +73,13 @@ This document explains how the various example scripts work together to form a c
 - **Purpose**: Gain specific insights into fee dispute conversations
 - **API Endpoints**: `/api/analysis/attributes`, `/api/analysis/trends`, and `/api/analysis/findings`
 
+### 7. Action Plan Creation (create_action_plan.go)
+- **Input**: Intent groups and structured attributes
+- **Process**: Generates actionable recommendations based on conversation analysis
+- **Output**: JSON file with prioritized action plan
+- **Purpose**: Convert analysis insights into concrete actions
+- **API Endpoint**: `/api/analysis/recommendations`
+
 ## API Integration
 
 All scripts communicate with the API server running at http://localhost:8080 and utilize the following endpoints:
@@ -59,6 +89,7 @@ All scripts communicate with the API server running at http://localhost:8080 and
 - `/api/analysis/patterns` - For pattern identification in data
 - `/api/analysis/trends` - For trend analysis in structured data
 - `/api/analysis/findings` - For deep analysis of specific insights
+- `/api/analysis/recommendations` - For generating actionable recommendations
 
 The `ApiClient` class in `utils.go` handles all API communications with retries and error handling.
 
@@ -86,6 +117,21 @@ Use `match_intents.go` to evaluate how well the system is classifying intents co
 
 ### Focused Analysis
 Use `analyze_fee_disputes.go` to deeply analyze specific conversation types (in this case, fee disputes).
+
+### Action Planning
+Use `create_action_plan.go` to generate prioritized recommendations based on the analysis results.
+
+## Error Handling
+
+Each script in the pipeline includes robust error handling for common scenarios:
+
+1. **API Connection Errors**: Automatic retries with exponential backoff when the API server is unavailable
+2. **Data Validation Errors**: Clear error messages when input data doesn't meet expected formats
+3. **Rate Limiting**: Respects API rate limits with appropriate pausing
+4. **Incomplete Results**: Partial results are saved with warnings when some items fail processing
+5. **Database Errors**: Detailed error messages for database connectivity issues
+
+See the `utils.go` file for the common error handling implementation used across all scripts.
 
 ## Extending the Pipeline
 
