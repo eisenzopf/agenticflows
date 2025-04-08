@@ -76,6 +76,10 @@ while [[ $# -gt 0 ]]; do
             USE_MOCK=true
             shift
             ;;
+        -v|--verbose)
+            DEBUG=true
+            shift
+            ;;
         --debug)
             DEBUG=true
             shift

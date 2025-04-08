@@ -109,9 +109,9 @@ func main() {
 		// Extract attributes from response
 		if attrResults, ok := resp.Results.(map[string]interface{}); ok {
 			result := map[string]interface{}{
-				"conversation_id": conv.ID,
-				"attributes":      attrResults["attributes"],
-				"confidence":      resp.Confidence,
+				"conversation_id":  conv.ID,
+				"attribute_values": attrResults["attribute_values"],
+				"confidence":       resp.Confidence,
 			}
 			results = append(results, result)
 		}
@@ -122,11 +122,11 @@ func main() {
 	for _, result := range results {
 		fmt.Printf("\nConversation ID: %s\n", result["conversation_id"])
 		fmt.Printf("Confidence: %.2f\n", result["confidence"])
-		if attrs, ok := result["attributes"].([]interface{}); ok {
+		if attrs, ok := result["attribute_values"].([]interface{}); ok {
 			for _, attr := range attrs {
 				if attrMap, ok := attr.(map[string]interface{}); ok {
-					fmt.Printf("\n  Question: %s\n", utils.GetString(attrMap, "question"))
-					fmt.Printf("  Answer: %s\n", utils.GetString(attrMap, "answer"))
+					fmt.Printf("\n  Field: %s\n", utils.GetString(attrMap, "field_name"))
+					fmt.Printf("  Value: %s\n", utils.GetString(attrMap, "value"))
 					fmt.Printf("  Confidence: %.2f\n", utils.GetFloat64(attrMap, "confidence"))
 					if explanation := utils.GetString(attrMap, "explanation"); explanation != "" {
 						fmt.Printf("  Explanation: %s\n", explanation)

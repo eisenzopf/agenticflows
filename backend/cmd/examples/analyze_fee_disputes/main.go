@@ -175,9 +175,10 @@ func processBatchedTrends(apiClient *client.Client, disputeData []map[string]int
 
 		fmt.Printf("Processing trends batch %d/%d (%d disputes)...\n", (i/batchSize)+1, batchCount, len(batch))
 
-		// Create request for this batch
+		// Create request for this batch - restructured to match API expectations
 		req := client.StandardAnalysisRequest{
 			AnalysisType: "trends",
+			Text:         "", // Not using text field for this analysis
 			Parameters: map[string]interface{}{
 				"focus_areas": []string{
 					"fee_dispute_trends",
@@ -204,12 +205,23 @@ func processBatchedTrends(apiClient *client.Client, disputeData []map[string]int
 			continue
 		}
 
-		// Extract trends from response
+		// Extract trends from response - updated to match API response format
 		if results, ok := resp.Results.(map[string]interface{}); ok {
 			// Extract trend descriptions
 			if trendsData, ok := results["trend_descriptions"].([]interface{}); ok {
 				for _, t := range trendsData {
 					if trend, ok := t.(string); ok {
+						allTrends = append(allTrends, trend)
+					}
+				}
+			} else if trendsData, ok := results["trends"].([]interface{}); ok {
+				// Try alternative field name
+				for _, t := range trendsData {
+					if trendMap, ok := t.(map[string]interface{}); ok {
+						if desc, ok := trendMap["description"].(string); ok {
+							allTrends = append(allTrends, desc)
+						}
+					} else if trend, ok := t.(string); ok {
 						allTrends = append(allTrends, trend)
 					}
 				}
@@ -219,6 +231,17 @@ func processBatchedTrends(apiClient *client.Client, disputeData []map[string]int
 			if actionsData, ok := results["recommended_actions"].([]interface{}); ok {
 				for _, a := range actionsData {
 					if action, ok := a.(string); ok {
+						allActions = append(allActions, action)
+					}
+				}
+			} else if actionsData, ok := results["actions"].([]interface{}); ok {
+				// Try alternative field name
+				for _, a := range actionsData {
+					if actionMap, ok := a.(map[string]interface{}); ok {
+						if action, ok := actionMap["action"].(string); ok {
+							allActions = append(allActions, action)
+						}
+					} else if action, ok := a.(string); ok {
 						allActions = append(allActions, action)
 					}
 				}
@@ -265,9 +288,10 @@ func processBatchedPatterns(apiClient *client.Client, disputeData []map[string]i
 
 		fmt.Printf("Processing patterns batch %d/%d (%d disputes)...\n", (i/batchSize)+1, batchCount, len(batch))
 
-		// Create request for this batch
+		// Create request for this batch - restructured to match API expectations
 		req := client.StandardAnalysisRequest{
 			AnalysisType: "patterns",
+			Text:         "", // Not using text field for this analysis
 			Parameters: map[string]interface{}{
 				"pattern_types": []string{
 					"fee_dispute_patterns",
@@ -351,14 +375,19 @@ func processBatchedPatterns(apiClient *client.Client, disputeData []map[string]i
 			continue
 		}
 
-		// Extract patterns from response
+		// Extract patterns from response - updated to match API response format
 		if results, ok := resp.Results.(map[string]interface{}); ok {
+			// Try multiple possible field names for patterns
 			if patternList, ok := results["patterns"].([]interface{}); ok {
 				for _, pattern := range patternList {
 					if patternMap, ok := pattern.(map[string]interface{}); ok {
 						if desc, ok := patternMap["pattern_description"].(string); ok {
 							allPatterns = append(allPatterns, desc)
+						} else if desc, ok := patternMap["description"].(string); ok {
+							allPatterns = append(allPatterns, desc)
 						}
+					} else if pattern, ok := pattern.(string); ok {
+						allPatterns = append(allPatterns, pattern)
 					}
 				}
 			}
@@ -404,9 +433,10 @@ func processBatchedFindings(apiClient *client.Client, disputeData []map[string]i
 
 		fmt.Printf("Processing findings batch %d/%d (%d disputes)...\n", (i/batchSize)+1, batchCount, len(batch))
 
-		// Create request for this batch
+		// Create request for this batch - restructured to match API expectations
 		req := client.StandardAnalysisRequest{
 			AnalysisType: "findings",
+			Text:         "", // Not using text field for this analysis
 			Parameters: map[string]interface{}{
 				"questions": []string{
 					"What are the most common types of fee disputes?",
@@ -419,7 +449,7 @@ func processBatchedFindings(apiClient *client.Client, disputeData []map[string]i
 			Data: map[string]interface{}{
 				"disputes":      batch,
 				"conversations": getLimitedConversations(conversations, 2),
-				"trends":        analysis,
+				"trends":        analysis.TrendDescriptions, // Send just the trend descriptions
 				"patterns":      patterns,
 				"attributes": []map[string]interface{}{
 					{
@@ -493,13 +523,17 @@ func processBatchedFindings(apiClient *client.Client, disputeData []map[string]i
 			continue
 		}
 
-		// Extract findings from response
+		// Extract findings from response - updated to match API response format
 		if results, ok := resp.Results.(map[string]interface{}); ok {
 			// Extract findings
 			if findingsData, ok := results["findings"].([]interface{}); ok {
 				for _, f := range findingsData {
 					if finding, ok := f.(string); ok {
 						allFindings = append(allFindings, finding)
+					} else if findingMap, ok := f.(map[string]interface{}); ok {
+						if finding, ok := findingMap["description"].(string); ok {
+							allFindings = append(allFindings, finding)
+						}
 					}
 				}
 			}
@@ -509,6 +543,10 @@ func processBatchedFindings(apiClient *client.Client, disputeData []map[string]i
 				for _, r := range recsData {
 					if rec, ok := r.(string); ok {
 						allRecommendations = append(allRecommendations, rec)
+					} else if recMap, ok := r.(map[string]interface{}); ok {
+						if rec, ok := recMap["action"].(string); ok {
+							allRecommendations = append(allRecommendations, rec)
+						}
 					}
 				}
 			}

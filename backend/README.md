@@ -2,6 +2,55 @@
 
 This is the backend for the Discourse AI application.
 
+## Getting Started
+
+### Prerequisites
+
+- Go 1.21+
+- Google Gemini API key (set as `GEMINI_API_KEY` environment variable)
+- SQLite database (automatically initialized during startup)
+
+### Installation
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/eisenzopf/agenticflows.git
+   cd agenticflows
+   ```
+
+2. Install dependencies:
+   ```bash
+   go mod download
+   ```
+
+3. Build the server:
+   ```bash
+   cd backend
+   go build -o server ./api
+   ```
+
+### Running the Server
+
+1. Set the required environment variables:
+   ```bash
+   export GEMINI_API_KEY="your-api-key-here"
+   ```
+
+2. Start the server:
+   ```bash
+   ./server
+   ```
+
+   The server will start on port 8080 by default. You should see:
+   ```
+   Starting server on :8080
+   Analysis endpoints initialized with types: trends, patterns, findings, attributes, intent, recommendations, plan
+   ```
+
+3. For development with mock data (no API key required):
+   
+   When making API requests, add the `use_mock_data: true` parameter to avoid making actual LLM API calls (see example below).
+
 ## API Endpoints
 
 ### Analysis Endpoint

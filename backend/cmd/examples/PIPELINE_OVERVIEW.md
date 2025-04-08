@@ -1,7 +1,7 @@
 # Conversation Analysis Pipeline Overview
 
 _Last Updated: [Current Date]_
-_Version: 1.0.1_
+_Version: 1.0.2_
 
 This document explains how the various example scripts work together to form a comprehensive conversation analysis pipeline.
 
@@ -36,60 +36,64 @@ Note: Please open this file in a Markdown viewer that supports Mermaid diagrams 
 - **Process**: Analyzes each conversation to determine primary intent
 - **Output**: JSON file with conversations and their associated intents
 - **Purpose**: Categorize conversations by primary customer intent
-- **API Endpoint**: `/api/analysis/intent`
+- **API Endpoint**: `/api/analysis` with `analysis_type: "intent"`
 
 ### 2. Intent Grouping (group_intents.go)
 - **Input**: Generated intents from step 1
 - **Process**: Groups similar intents to identify patterns
 - **Output**: JSON file with intent groups and their related conversations
 - **Purpose**: Identify common intent categories and reduce intent fragmentation
-- **API Endpoint**: Uses several endpoints including `/api/analysis/patterns`
+- **API Endpoint**: Uses `/api/analysis` with `analysis_type: "patterns"`
 
 ### 3. Attribute Identification (identify_attributes.go)
 - **Input**: Conversations filtered by specific intents
 - **Process**: Analyzes conversations to identify what attributes could be extracted
 - **Output**: JSON file with suggested attribute definitions
 - **Purpose**: Determine what structured data fields would be useful for further analysis
-- **API Endpoint**: `/api/analysis/attributes` with `generate_required` flag
+- **API Endpoint**: `/api/analysis` with `analysis_type: "attributes"` and `parameters: { "generate_required": true }`
 
 ### 4. Attribute Generation (generate_attributes.go)
 - **Input**: Conversations and attribute definitions
 - **Process**: Extracts specific attribute values from conversations
 - **Output**: JSON file with conversations and their extracted attributes
 - **Purpose**: Create structured data from unstructured conversations
-- **API Endpoint**: `/api/analysis/attributes`
+- **API Endpoint**: `/api/analysis` with `analysis_type: "attributes"`
 
 ### 5. Intent Matching (match_intents.go)
 - **Input**: Generated intents and predefined intent categories
 - **Process**: Compares generated intents against expected categories
 - **Output**: JSON file with matching results and evaluation metrics
 - **Purpose**: Evaluate intent classification accuracy and improve categorization
-- **API Endpoint**: `/api/analysis/intent`
+- **API Endpoint**: `/api/analysis` with `analysis_type: "intent"`
 
 ### 6. Fee Dispute Analysis (analyze_fee_disputes.go)
 - **Input**: Conversations specifically about fee disputes with generated attributes
 - **Process**: Deep analysis of fee dispute patterns, causes, and resolutions
 - **Output**: JSON file with analysis results, trends, and insights
 - **Purpose**: Gain specific insights into fee dispute conversations
-- **API Endpoints**: `/api/analysis/attributes`, `/api/analysis/trends`, and `/api/analysis/findings`
+- **API Endpoints**: `/api/analysis` with various analysis types including `"attributes"`, `"trends"`, and `"findings"`
 
 ### 7. Action Plan Creation (create_action_plan.go)
 - **Input**: Intent groups and structured attributes
 - **Process**: Generates actionable recommendations based on conversation analysis
 - **Output**: JSON file with prioritized action plan
 - **Purpose**: Convert analysis insights into concrete actions
-- **API Endpoint**: `/api/analysis/recommendations`
+- **API Endpoint**: `/api/analysis` with `analysis_type: "recommendations"` and/or `analysis_type: "plan"`
 
 ## API Integration
 
-All scripts communicate with the API server running at http://localhost:8080 and utilize the following endpoints:
+All scripts communicate with the API server running at http://localhost:8080 and utilize the consolidated standard endpoint:
 
-- `/api/analysis/intent` - For intent classification
-- `/api/analysis/attributes` - For attribute extraction and identification
-- `/api/analysis/patterns` - For pattern identification in data
-- `/api/analysis/trends` - For trend analysis in structured data
-- `/api/analysis/findings` - For deep analysis of specific insights
-- `/api/analysis/recommendations` - For generating actionable recommendations
+- `/api/analysis` - Unified endpoint for all analysis types with the following analysis_type values:
+  - `"intent"` - For intent classification
+  - `"attributes"` - For attribute extraction and identification
+  - `"patterns"` - For pattern identification in data
+  - `"trends"` - For trend analysis in structured data
+  - `"findings"` - For deep analysis of specific insights
+  - `"recommendations"` - For generating actionable recommendations
+  - `"plan"` - For creating action plans from recommendations
+
+> **Note**: This is an update from the previous version which used separate endpoints for each analysis type. The consolidated `/api/analysis` endpoint provides a more standardized interface while maintaining all existing functionality.
 
 The `ApiClient` class in `utils.go` handles all API communications with retries and error handling.
 
@@ -143,3 +147,5 @@ The pipeline can be extended with additional scripts for:
 - Conversation clustering
 
 Any new script should follow the pattern of reading input data, processing it through the API, and producing structured output. 
+
+For more complex analysis workflows, consider using the `/api/analysis/chain` endpoint which allows chaining multiple analysis steps in a single request. 

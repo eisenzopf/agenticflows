@@ -17,7 +17,7 @@ import (
 func main() {
 	// Parse command-line flags
 	dbPath := flag.String("db", "", "Path to the SQLite database")
-	intents := flag.String("intents", "cancel,upgrade,billing", "Comma-separated list of intents to match")
+	intents := flag.String("intents", "fee dispute", "Comma-separated list of intents to match")
 	limit := flag.Int("limit", 10, "Number of conversations to analyze")
 	threshold := flag.Float64("threshold", 0.7, "Confidence threshold for intent matching")
 	debugFlag := flag.Bool("debug", false, "Enable debug mode")
@@ -78,13 +78,14 @@ func main() {
 			continue
 		}
 
-		// Extract matches from response
-		if matchResults, ok := resp.Results.(map[string]interface{}); ok {
+		// Extract intent from response
+		if intentResults, ok := resp.Results.(map[string]interface{}); ok {
 			result := map[string]interface{}{
 				"conversation_id": conv.ID,
-				"matches":         matchResults["matches"],
+				"intent":          intentResults["label_name"],
+				"intent_label":    intentResults["label"],
 				"confidence":      resp.Confidence,
-				"explanation":     matchResults["explanation"],
+				"explanation":     intentResults["description"],
 			}
 			results = append(results, result)
 		}
@@ -94,18 +95,10 @@ func main() {
 	fmt.Println("\n=== Intent Matching Results ===")
 	for _, result := range results {
 		fmt.Printf("\nConversation ID: %s\n", result["conversation_id"])
+		fmt.Printf("Intent: %s\n", result["intent"])
+		fmt.Printf("Intent Label: %s\n", result["intent_label"])
 		fmt.Printf("Confidence: %.2f\n", result["confidence"])
-		if matches, ok := result["matches"].([]interface{}); ok {
-			for _, match := range matches {
-				if matchMap, ok := match.(map[string]interface{}); ok {
-					fmt.Printf("\n  Intent: %s\n", utils.GetString(matchMap, "intent"))
-					fmt.Printf("  Score: %.2f\n", utils.GetFloat64(matchMap, "score"))
-					if explanation := utils.GetString(matchMap, "explanation"); explanation != "" {
-						fmt.Printf("  Explanation: %s\n", explanation)
-					}
-				}
-			}
-		}
+		fmt.Printf("Explanation: %s\n", result["explanation"])
 	}
 
 	utils.PrintTimeTaken(startTime, "Match intents")

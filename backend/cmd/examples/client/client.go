@@ -114,12 +114,52 @@ func (c *Client) PerformAnalysis(req StandardAnalysisRequest) (*StandardAnalysis
 	// Parse response
 	var result StandardAnalysisResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
-		return nil, fmt.Errorf("error parsing response: %w", err)
+		// If standard unmarshal fails, try to parse as a general map
+		var rawResponse map[string]interface{}
+		if jsonErr := json.Unmarshal(respBody, &rawResponse); jsonErr != nil {
+			return nil, fmt.Errorf("error parsing response: %w (raw error: %v)", err, jsonErr)
+		}
+
+		// Try to extract fields from raw response
+		analysisType, _ := rawResponse["analysis_type"].(string)
+		results := rawResponse["results"]
+		confidence, _ := rawResponse["confidence"].(float64)
+		errorMsg, _ := rawResponse["error"].(string)
+
+		// Create a response from the raw data
+		result = StandardAnalysisResponse{
+			AnalysisType: analysisType,
+			Results:      results,
+			Confidence:   confidence,
+			Error:        errorMsg,
+		}
 	}
 
 	// Check for API-level errors
 	if result.Error != "" {
 		return nil, fmt.Errorf("API returned error: %s", result.Error)
+	}
+
+	// If the Results field is null or missing, try to establish a default result structure
+	if result.Results == nil {
+		switch req.AnalysisType {
+		case "trends":
+			result.Results = map[string]interface{}{
+				"trend_descriptions":  []interface{}{},
+				"recommended_actions": []interface{}{},
+			}
+		case "patterns":
+			result.Results = map[string]interface{}{
+				"patterns": []interface{}{},
+			}
+		case "findings":
+			result.Results = map[string]interface{}{
+				"findings":        []interface{}{},
+				"recommendations": []interface{}{},
+			}
+		default:
+			result.Results = map[string]interface{}{}
+		}
 	}
 
 	return &result, nil

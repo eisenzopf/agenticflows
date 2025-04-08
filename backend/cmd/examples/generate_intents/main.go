@@ -81,9 +81,9 @@ func main() {
 		if intentResults, ok := resp.Results.(map[string]interface{}); ok {
 			result := map[string]interface{}{
 				"conversation_id": conv.ID,
-				"intent":          intentResults["intent"],
+				"intent":          intentResults["label_name"],
 				"confidence":      resp.Confidence,
-				"explanation":     intentResults["explanation"],
+				"explanation":     intentResults["description"],
 			}
 			results = append(results, result)
 		}
