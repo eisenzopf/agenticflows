@@ -86,9 +86,13 @@ func (c *Client) PerformAnalysis(req StandardAnalysisRequest) (*StandardAnalysis
 		return nil, fmt.Errorf("error marshaling request: %w", err)
 	}
 
-	// Debug output - only print a summary of the request in debug mode
+	// Debug output - print full request details in debug mode
 	if c.debug {
-		fmt.Printf("API Request to %s/api/analysis (type: %s)\n", c.baseURL, req.AnalysisType)
+		fmt.Printf("\n=== API REQUEST ===\n")
+		fmt.Printf("URL: %s/api/analysis\n", c.baseURL)
+		fmt.Printf("Type: %s\n", req.AnalysisType)
+		fmt.Printf("Request Payload:\n%s\n", prettyJSON(reqBody))
+		fmt.Printf("==================\n\n")
 	}
 
 	// Create HTTP request
@@ -111,9 +115,12 @@ func (c *Client) PerformAnalysis(req StandardAnalysisRequest) (*StandardAnalysis
 		return nil, fmt.Errorf("error reading response: %w", err)
 	}
 
-	// Debug output - only print a brief summary in debug mode
+	// Debug output - print full response details in debug mode
 	if c.debug {
-		fmt.Printf("API Response received from %s/api/analysis (status: %s)\n", c.baseURL, resp.Status)
+		fmt.Printf("\n=== API RESPONSE ===\n")
+		fmt.Printf("Status: %s\n", resp.Status)
+		fmt.Printf("Response Payload:\n%s\n", prettyJSON(respBody))
+		fmt.Printf("===================\n\n")
 	}
 
 	// Check response status
@@ -326,3 +333,13 @@ func (c *Client) AnalyzeFindings(data map[string]interface{}) (map[string]interf
 //     // Process the mock response
 //     fmt.Printf("Got %d mock recommendations\n", len(response.Results.(map[string]interface{})["recommendations"].([]interface{})))
 // }
+
+// prettyJSON formats a JSON byte array for better readability
+func prettyJSON(data []byte) string {
+	var out bytes.Buffer
+	err := json.Indent(&out, data, "", "  ")
+	if err != nil {
+		return string(data) // Return raw data if prettifying fails
+	}
+	return out.String()
+}

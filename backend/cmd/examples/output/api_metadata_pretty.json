@@ -1,0 +1,311 @@
+{
+  "attributes": {
+    "id": "analysis-attributes",
+    "label": "Extract Attributes",
+    "description": "Extract attribute values from text",
+    "inputs": [
+      {
+        "name": "Text",
+        "path": "text",
+        "description": "Text to extract attributes from",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Attributes",
+        "path": "parameters.attributes",
+        "description": "Attribute definitions",
+        "required": true,
+        "type": "object[]"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "Attribute Values",
+        "path": "results.attribute_values",
+        "description": "Extracted attribute values",
+        "type": "object[]"
+      }
+    ]
+  },
+  "chain": {
+    "id": "analysis-chain",
+    "label": "Chain Analysis",
+    "description": "Perform a chain of analysis steps",
+    "inputs": [
+      {
+        "name": "Input Data",
+        "path": "input_data",
+        "description": "Initial data for analysis chain",
+        "required": true,
+        "type": "object"
+      },
+      {
+        "name": "Configuration",
+        "path": "config",
+        "description": "Chain analysis configuration",
+        "required": true,
+        "type": "object"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "Results",
+        "path": "results",
+        "description": "Combined analysis results",
+        "type": "object"
+      },
+      {
+        "name": "Duration",
+        "path": "duration",
+        "description": "Analysis duration",
+        "type": "string"
+      }
+    ]
+  },
+  "findings": {
+    "id": "analysis-findings",
+    "label": "Analyze Findings",
+    "description": "Generate findings based on analysis",
+    "inputs": [
+      {
+        "name": "Questions",
+        "path": "parameters.questions",
+        "description": "Questions to answer in the analysis",
+        "required": true,
+        "type": "string[]"
+      },
+      {
+        "name": "Analysis Results",
+        "path": "data.analysis_results",
+        "description": "Previous analysis results to analyze",
+        "required": true,
+        "type": "object"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "Findings",
+        "path": "results.findings",
+        "description": "Key findings from analysis",
+        "type": "string[]"
+      },
+      {
+        "name": "Insights",
+        "path": "results.insights",
+        "description": "Derived insights",
+        "type": "string[]"
+      },
+      {
+        "name": "Data Gaps",
+        "path": "results.data_gaps",
+        "description": "Identified gaps in data",
+        "type": "string[]"
+      }
+    ]
+  },
+  "intent": {
+    "id": "analysis-intent",
+    "label": "Generate Intent",
+    "description": "Identify the primary intent in a conversation",
+    "inputs": [
+      {
+        "name": "Text",
+        "path": "text",
+        "description": "Text to analyze for intent",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "Label Name",
+        "path": "results.label_name",
+        "description": "Human-readable intent label",
+        "type": "string"
+      },
+      {
+        "name": "Label",
+        "path": "results.label",
+        "description": "Machine-readable intent label",
+        "type": "string"
+      },
+      {
+        "name": "Description",
+        "path": "results.description",
+        "description": "Intent description",
+        "type": "string"
+      }
+    ]
+  },
+  "patterns": {
+    "id": "analysis-patterns",
+    "label": "Identify Patterns",
+    "description": "Identify patterns in conversation data",
+    "inputs": [
+      {
+        "name": "Pattern Types",
+        "path": "parameters.pattern_types",
+        "description": "Types of patterns to identify",
+        "required": true,
+        "type": "string[]"
+      },
+      {
+        "name": "Sample Data",
+        "path": "data.sample_data",
+        "description": "Data samples to analyze",
+        "required": true,
+        "type": "object[]"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "Patterns",
+        "path": "results.patterns",
+        "description": "Identified patterns",
+        "type": "object[]"
+      },
+      {
+        "name": "Categories",
+        "path": "results.categories",
+        "description": "Pattern categories",
+        "type": "string[]"
+      }
+    ]
+  },
+  "plan": {
+    "id": "analysis-plan",
+    "label": "Create Action Plan",
+    "description": "Create implementation plan from recommendations",
+    "inputs": [
+      {
+        "name": "Recommendations",
+        "path": "data.recommendations",
+        "description": "Recommendations to plan from",
+        "required": true,
+        "type": "object"
+      },
+      {
+        "name": "Constraints",
+        "path": "parameters.constraints",
+        "description": "Implementation constraints",
+        "required": false,
+        "type": "object"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "Goals",
+        "path": "results.goals",
+        "description": "Plan goals",
+        "type": "string[]"
+      },
+      {
+        "name": "Immediate Actions",
+        "path": "results.immediate_actions",
+        "description": "Immediate actions to take",
+        "type": "object[]"
+      },
+      {
+        "name": "Short Term Actions",
+        "path": "results.short_term_actions",
+        "description": "Short-term actions to take",
+        "type": "object[]"
+      },
+      {
+        "name": "Long Term Actions",
+        "path": "results.long_term_actions",
+        "description": "Long-term actions to take",
+        "type": "object[]"
+      },
+      {
+        "name": "Timeline",
+        "path": "results.timeline",
+        "description": "Implementation timeline",
+        "type": "object[]"
+      },
+      {
+        "name": "Risks Mitigations",
+        "path": "results.risks_mitigations",
+        "description": "Risk analysis and mitigations",
+        "type": "object[]"
+      }
+    ]
+  },
+  "recommendations": {
+    "id": "analysis-recommendations",
+    "label": "Generate Recommendations",
+    "description": "Generate actionable recommendations",
+    "inputs": [
+      {
+        "name": "Focus Area",
+        "path": "parameters.focus_area",
+        "description": "Area to focus recommendations on",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Analysis Results",
+        "path": "data.analysis_results",
+        "description": "Analysis results to base recommendations on",
+        "required": true,
+        "type": "object"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "Immediate Actions",
+        "path": "results.immediate_actions",
+        "description": "Recommended immediate actions",
+        "type": "object[]"
+      },
+      {
+        "name": "Implementation Notes",
+        "path": "results.implementation_notes",
+        "description": "Implementation notes and guidance",
+        "type": "string[]"
+      },
+      {
+        "name": "Success Metrics",
+        "path": "results.success_metrics",
+        "description": "Success metrics for recommendations",
+        "type": "string[]"
+      }
+    ]
+  },
+  "trends": {
+    "id": "analysis-trends",
+    "label": "Analyze Trends",
+    "description": "Analyze trends in conversation data",
+    "inputs": [
+      {
+        "name": "Focus Areas",
+        "path": "parameters.focus_areas",
+        "description": "Areas to focus trend analysis on",
+        "required": true,
+        "type": "string[]"
+      },
+      {
+        "name": "Historical Data",
+        "path": "data.historical_data",
+        "description": "Historical data for trend analysis",
+        "required": true,
+        "type": "object"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "Trends",
+        "path": "results.trends",
+        "description": "Identified trends and patterns",
+        "type": "object[]"
+      },
+      {
+        "name": "Metrics",
+        "path": "results.metrics",
+        "description": "Trend metrics and statistics",
+        "type": "object"
+      }
+    ]
+  }
+}
