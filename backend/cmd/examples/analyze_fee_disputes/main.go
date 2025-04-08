@@ -175,10 +175,16 @@ func processBatchedTrends(apiClient *client.Client, disputeData []map[string]int
 
 		fmt.Printf("Processing trends batch %d/%d (%d disputes)...\n", (i/batchSize)+1, batchCount, len(batch))
 
-		// Create request for this batch - restructured to match API expectations
+		// Enable debug for the first batch only if debug flag is on
+		if i == 0 {
+			apiClient.EnableDebug()
+		} else {
+			apiClient.DisableDebug()
+		}
+
+		// Create request for this batch
 		req := client.StandardAnalysisRequest{
 			AnalysisType: "trends",
-			Text:         "", // Not using text field for this analysis
 			Parameters: map[string]interface{}{
 				"focus_areas": []string{
 					"fee_dispute_trends",
@@ -188,9 +194,9 @@ func processBatchedTrends(apiClient *client.Client, disputeData []map[string]int
 				"concise_response": true,
 			},
 			Data: map[string]interface{}{
-				"disputes":      batch,
-				"conversations": getLimitedConversations(conversations, 2),
-				"attributes": map[string]interface{}{
+				"attribute_values": batch,
+				"conversations":    getLimitedConversations(conversations, 2),
+				"metadata": map[string]interface{}{
 					"avg_amount":       calculateAverageAmount(disputeData),
 					"total_disputes":   len(disputeData),
 					"dispute_timespan": "3 months",
@@ -205,45 +211,31 @@ func processBatchedTrends(apiClient *client.Client, disputeData []map[string]int
 			continue
 		}
 
-		// Extract trends from response - updated to match API response format
+		// Extract trends from response
 		if results, ok := resp.Results.(map[string]interface{}); ok {
-			// Extract trend descriptions
-			if trendsData, ok := results["trend_descriptions"].([]interface{}); ok {
-				for _, t := range trendsData {
-					if trend, ok := t.(string); ok {
-						allTrends = append(allTrends, trend)
-					}
-				}
-			} else if trendsData, ok := results["trends"].([]interface{}); ok {
-				// Try alternative field name
-				for _, t := range trendsData {
-					if trendMap, ok := t.(map[string]interface{}); ok {
-						if desc, ok := trendMap["description"].(string); ok {
-							allTrends = append(allTrends, desc)
-						}
-					} else if trend, ok := t.(string); ok {
-						allTrends = append(allTrends, trend)
+			// Try to extract trends
+			extractedTrends := extractArrayFromMap(results, []string{
+				"trend_descriptions", "trends",
+			})
+
+			for _, t := range extractedTrends {
+				if trend, ok := t.(string); ok {
+					allTrends = append(allTrends, trend)
+				} else if trendMap, ok := t.(map[string]interface{}); ok {
+					if desc, ok := trendMap["trend"].(string); ok {
+						allTrends = append(allTrends, desc)
 					}
 				}
 			}
 
-			// Extract recommended actions
-			if actionsData, ok := results["recommended_actions"].([]interface{}); ok {
-				for _, a := range actionsData {
-					if action, ok := a.(string); ok {
-						allActions = append(allActions, action)
-					}
-				}
-			} else if actionsData, ok := results["actions"].([]interface{}); ok {
-				// Try alternative field name
-				for _, a := range actionsData {
-					if actionMap, ok := a.(map[string]interface{}); ok {
-						if action, ok := actionMap["action"].(string); ok {
-							allActions = append(allActions, action)
-						}
-					} else if action, ok := a.(string); ok {
-						allActions = append(allActions, action)
-					}
+			// Try to extract insights/recommended actions
+			extractedActions := extractArrayFromMap(results, []string{
+				"recommended_actions", "overall_insights",
+			})
+
+			for _, a := range extractedActions {
+				if action, ok := a.(string); ok {
+					allActions = append(allActions, action)
 				}
 			}
 		}
@@ -251,10 +243,9 @@ func processBatchedTrends(apiClient *client.Client, disputeData []map[string]int
 
 	// If we didn't get any trends, return the default
 	if len(allTrends) == 0 {
-		return defaultAnalysis, nil
+		return defaultAnalysis, fmt.Errorf("no trends extracted from analysis results")
 	}
 
-	// Return the combined results
 	return Analysis{
 		TrendDescriptions:  allTrends,
 		RecommendedActions: allActions,
@@ -263,12 +254,9 @@ func processBatchedTrends(apiClient *client.Client, disputeData []map[string]int
 
 // processBatchedPatterns processes disputes in batches for pattern analysis
 func processBatchedPatterns(apiClient *client.Client, disputeData []map[string]interface{}, conversations []map[string]interface{}, batchSize int) ([]string, error) {
-	// Define default patterns in case of failure
-	defaultPatterns := []string{"No patterns identified due to processing error"}
-
-	// If there are no disputes, return default
+	// If there are no disputes, return empty
 	if len(disputeData) == 0 {
-		return defaultPatterns, fmt.Errorf("no dispute data to analyze")
+		return []string{"No patterns identified due to empty dataset"}, nil
 	}
 
 	// Process in smaller batches to avoid token limits
@@ -288,83 +276,27 @@ func processBatchedPatterns(apiClient *client.Client, disputeData []map[string]i
 
 		fmt.Printf("Processing patterns batch %d/%d (%d disputes)...\n", (i/batchSize)+1, batchCount, len(batch))
 
-		// Create request for this batch - restructured to match API expectations
+		// Only enable debug for first batch
+		if i == 0 {
+			apiClient.EnableDebug()
+		} else {
+			apiClient.DisableDebug()
+		}
+
+		// Create request for this batch
 		req := client.StandardAnalysisRequest{
 			AnalysisType: "patterns",
-			Text:         "", // Not using text field for this analysis
 			Parameters: map[string]interface{}{
 				"pattern_types": []string{
-					"fee_dispute_patterns",
+					"fee_disputes",
+					"customer_behavior",
 					"resolution_patterns",
-					"customer_behavior_patterns",
 				},
 				"concise_response": true,
 			},
 			Data: map[string]interface{}{
-				"disputes":      batch,
-				"conversations": getLimitedConversations(conversations, 2),
-				"attributes": []map[string]interface{}{
-					{
-						"field_name":  "dispute_type",
-						"title":       "Type of Fee Dispute",
-						"description": "Categorization of the fee dispute (e.g., late fee, overdraft fee, service fee)",
-					},
-					{
-						"field_name":  "resolution_offered",
-						"title":       "Resolution Offered",
-						"description": "Whether a resolution was offered to the customer",
-					},
-					{
-						"field_name":  "resolution_type",
-						"title":       "Type of Resolution",
-						"description": "The type of resolution offered (e.g., full refund, partial refund)",
-					},
-					{
-						"field_name":  "resolution_outcome",
-						"title":       "Resolution Outcome",
-						"description": "The final outcome of the dispute",
-					},
-					{
-						"field_name":  "agent_explanation",
-						"title":       "Agent Explanation",
-						"description": "The agent's explanation for the fee",
-					},
-					{
-						"field_name":  "de_escalation_techniques",
-						"title":       "De-escalation Techniques Used",
-						"description": "Techniques used by the agent to de-escalate the situation",
-					},
-					{
-						"field_name":  "customer_sentiment_start",
-						"title":       "Customer Sentiment (Start)",
-						"description": "Customer's sentiment at the start of the conversation",
-					},
-					{
-						"field_name":  "customer_sentiment_end",
-						"title":       "Customer Sentiment (End)",
-						"description": "Customer's sentiment at the end of the conversation",
-					},
-					{
-						"field_name":  "call_id",
-						"title":       "Call ID",
-						"description": "Unique identifier for the call",
-					},
-					{
-						"field_name":  "call_duration",
-						"title":       "Call Duration",
-						"description": "Length of the call",
-					},
-					{
-						"field_name":  "agent_id",
-						"title":       "Agent ID",
-						"description": "Unique identifier for the agent",
-					},
-					{
-						"field_name":  "call_timestamp",
-						"title":       "Call Timestamp",
-						"description": "When the call occurred",
-					},
-				},
+				"attribute_values": batch,
+				"conversations":    getLimitedConversations(conversations, 2),
 			},
 		}
 
@@ -375,48 +307,55 @@ func processBatchedPatterns(apiClient *client.Client, disputeData []map[string]i
 			continue
 		}
 
-		// Extract patterns from response - updated to match API response format
+		// Extract patterns from response
 		if results, ok := resp.Results.(map[string]interface{}); ok {
-			// Try multiple possible field names for patterns
-			if patternList, ok := results["patterns"].([]interface{}); ok {
-				for _, pattern := range patternList {
-					if patternMap, ok := pattern.(map[string]interface{}); ok {
-						if desc, ok := patternMap["pattern_description"].(string); ok {
-							allPatterns = append(allPatterns, desc)
-						} else if desc, ok := patternMap["description"].(string); ok {
-							allPatterns = append(allPatterns, desc)
-						}
-					} else if pattern, ok := pattern.(string); ok {
+			// Try to extract patterns directly
+			if patterns, ok := results["patterns"].([]interface{}); ok {
+				for _, p := range patterns {
+					if pattern, ok := p.(string); ok {
 						allPatterns = append(allPatterns, pattern)
+					}
+				}
+			}
+
+			// Try alternative field names that might contain patterns
+			for _, field := range []string{"identified_patterns", "key_patterns"} {
+				if patterns, ok := results[field].([]interface{}); ok {
+					for _, p := range patterns {
+						if pattern, ok := p.(string); ok {
+							allPatterns = append(allPatterns, pattern)
+						}
 					}
 				}
 			}
 		}
 	}
 
-	// If we didn't get any patterns, return the default
+	// If we didn't get any patterns, return a default
 	if len(allPatterns) == 0 {
-		return defaultPatterns, nil
+		return []string{"No significant patterns identified in the data"}, nil
 	}
 
-	// Return the combined results
 	return allPatterns, nil
 }
 
-// processBatchedFindings processes disputes in batches for findings analysis
+// processBatchedFindings generates findings and recommendations from the analysis results
 func processBatchedFindings(apiClient *client.Client, disputeData []map[string]interface{}, conversations []map[string]interface{},
 	analysis Analysis, patterns []string, batchSize int) ([]string, []string, error) {
-	// Define default findings in case of failure
-	defaultFindings := []string{"No findings identified due to processing error"}
-	defaultRecommendations := []string{"Review the raw data manually to identify recommendations"}
 
-	// If there are no disputes, return defaults
+	// If there are no disputes, return empty
 	if len(disputeData) == 0 {
-		return defaultFindings, defaultRecommendations, fmt.Errorf("no dispute data to analyze")
+		return []string{"No findings available due to empty dataset"},
+			[]string{"Collect more data to generate meaningful recommendations"}, nil
 	}
 
-	// Process in smaller batches to avoid token limits
-	batchCount := (len(disputeData) + batchSize - 1) / batchSize
+	// Use a smaller batch size for findings as they are more complex
+	findingsBatchSize := batchSize / 2
+	if findingsBatchSize < 5 {
+		findingsBatchSize = 5
+	}
+
+	batchCount := (len(disputeData) + findingsBatchSize - 1) / findingsBatchSize
 	fmt.Printf("Processing %d disputes in %d batches for findings analysis\n", len(disputeData), batchCount)
 
 	// Combine results from all batches
@@ -424,94 +363,49 @@ func processBatchedFindings(apiClient *client.Client, disputeData []map[string]i
 	var allRecommendations []string
 
 	// Process each batch
-	for i := 0; i < len(disputeData); i += batchSize {
-		end := i + batchSize
+	for i := 0; i < len(disputeData); i += findingsBatchSize {
+		end := i + findingsBatchSize
 		if end > len(disputeData) {
 			end = len(disputeData)
 		}
 		batch := disputeData[i:end]
 
-		fmt.Printf("Processing findings batch %d/%d (%d disputes)...\n", (i/batchSize)+1, batchCount, len(batch))
+		fmt.Printf("Processing findings batch %d/%d (%d disputes)...\n", (i/findingsBatchSize)+1, batchCount, len(batch))
 
-		// Create request for this batch - restructured to match API expectations
+		// Only enable debug for first batch
+		if i == 0 {
+			apiClient.EnableDebug()
+		} else {
+			apiClient.DisableDebug()
+		}
+
+		// Prepare trends and patterns to include in this request
+		// We need to include the overall analysis to provide context
+		trendsData := map[string]interface{}{
+			"trend_descriptions":  analysis.TrendDescriptions,
+			"recommended_actions": analysis.RecommendedActions,
+		}
+
+		// Create request for this batch
 		req := client.StandardAnalysisRequest{
 			AnalysisType: "findings",
-			Text:         "", // Not using text field for this analysis
 			Parameters: map[string]interface{}{
 				"questions": []string{
-					"What are the most common types of fee disputes?",
-					"What is the average resolution time?",
-					"What are the most effective resolution strategies?",
-					"What are the key areas for improvement?",
+					"What are the key issues in fee disputes?",
+					"How can customer satisfaction be improved?",
+					"What are the financial implications of these disputes?",
+					"How effective are current dispute resolution processes?",
 				},
 				"concise_response": true,
 			},
 			Data: map[string]interface{}{
-				"disputes":      batch,
-				"conversations": getLimitedConversations(conversations, 2),
-				"trends":        analysis.TrendDescriptions, // Send just the trend descriptions
-				"patterns":      patterns,
-				"attributes": []map[string]interface{}{
-					{
-						"field_name":  "dispute_type",
-						"title":       "Type of Fee Dispute",
-						"description": "Categorization of the fee dispute (e.g., late fee, overdraft fee, service fee)",
-					},
-					{
-						"field_name":  "resolution_offered",
-						"title":       "Resolution Offered",
-						"description": "Whether a resolution was offered to the customer",
-					},
-					{
-						"field_name":  "resolution_type",
-						"title":       "Type of Resolution",
-						"description": "The type of resolution offered (e.g., full refund, partial refund)",
-					},
-					{
-						"field_name":  "resolution_outcome",
-						"title":       "Resolution Outcome",
-						"description": "The final outcome of the dispute",
-					},
-					{
-						"field_name":  "agent_explanation",
-						"title":       "Agent Explanation",
-						"description": "The agent's explanation for the fee",
-					},
-					{
-						"field_name":  "de_escalation_techniques",
-						"title":       "De-escalation Techniques Used",
-						"description": "Techniques used by the agent to de-escalate the situation",
-					},
-					{
-						"field_name":  "customer_sentiment_start",
-						"title":       "Customer Sentiment (Start)",
-						"description": "Customer's sentiment at the start of the conversation",
-					},
-					{
-						"field_name":  "customer_sentiment_end",
-						"title":       "Customer Sentiment (End)",
-						"description": "Customer's sentiment at the end of the conversation",
-					},
-					{
-						"field_name":  "call_id",
-						"title":       "Call ID",
-						"description": "Unique identifier for the call",
-					},
-					{
-						"field_name":  "call_duration",
-						"title":       "Call Duration",
-						"description": "Length of the call",
-					},
-					{
-						"field_name":  "agent_id",
-						"title":       "Agent ID",
-						"description": "Unique identifier for the agent",
-					},
-					{
-						"field_name":  "call_timestamp",
-						"title":       "Call Timestamp",
-						"description": "When the call occurred",
-					},
+				"attribute_values": batch,
+				"conversations":    getLimitedConversations(conversations, 2),
+				"trends_data":      trendsData,
+				"patterns_data":    patterns,
+				"metadata": map[string]interface{}{
+					"avg_amount":     calculateAverageAmount(disputeData),
+					"total_disputes": len(disputeData),
 				},
 			},
 		}
@@ -519,46 +413,41 @@ func processBatchedFindings(apiClient *client.Client, disputeData []map[string]i
 		// Make API request
 		resp, err := apiClient.PerformAnalysis(req)
 		if err != nil {
-			fmt.Printf("Error generating findings in batch %d: %v\n", (i/batchSize)+1, err)
+			fmt.Printf("Error generating findings in batch %d: %v\n", (i/findingsBatchSize)+1, err)
 			continue
 		}
 
-		// Extract findings from response - updated to match API response format
+		// Extract findings from response
 		if results, ok := resp.Results.(map[string]interface{}); ok {
-			// Extract findings
-			if findingsData, ok := results["findings"].([]interface{}); ok {
-				for _, f := range findingsData {
+			// Try to extract findings directly
+			if findings, ok := results["findings"].([]interface{}); ok {
+				for _, f := range findings {
 					if finding, ok := f.(string); ok {
 						allFindings = append(allFindings, finding)
-					} else if findingMap, ok := f.(map[string]interface{}); ok {
-						if finding, ok := findingMap["description"].(string); ok {
-							allFindings = append(allFindings, finding)
-						}
 					}
 				}
 			}
 
-			// Extract recommendations
-			if recsData, ok := results["recommendations"].([]interface{}); ok {
-				for _, r := range recsData {
+			// Try to extract recommendations directly
+			if recs, ok := results["recommendations"].([]interface{}); ok {
+				for _, r := range recs {
 					if rec, ok := r.(string); ok {
 						allRecommendations = append(allRecommendations, rec)
-					} else if recMap, ok := r.(map[string]interface{}); ok {
-						if rec, ok := recMap["action"].(string); ok {
-							allRecommendations = append(allRecommendations, rec)
-						}
 					}
 				}
 			}
 		}
 	}
 
-	// If we didn't get any findings, return the defaults
+	// If we didn't get any findings, return defaults
 	if len(allFindings) == 0 {
-		return defaultFindings, defaultRecommendations, nil
+		allFindings = []string{"No significant findings could be derived from the analysis"}
 	}
 
-	// Return the combined results
+	if len(allRecommendations) == 0 {
+		allRecommendations = []string{"Consider more detailed analysis to generate specific recommendations"}
+	}
+
 	return allFindings, allRecommendations, nil
 }
 
@@ -730,4 +619,14 @@ func fetchConversations(dbPath string, limit int) ([]map[string]interface{}, err
 	}
 
 	return conversations, nil
+}
+
+// Helper function to extract arrays from map using multiple possible field names
+func extractArrayFromMap(data map[string]interface{}, possibleFields []string) []interface{} {
+	for _, field := range possibleFields {
+		if arr, ok := data[field].([]interface{}); ok && len(arr) > 0 {
+			return arr
+		}
+	}
+	return []interface{}{}
 }

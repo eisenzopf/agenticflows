@@ -52,6 +52,16 @@ func NewClient(baseURL string, workflowID string, debug bool) *Client {
 	}
 }
 
+// EnableDebug enables debug mode for the client
+func (c *Client) EnableDebug() {
+	c.debug = true
+}
+
+// DisableDebug disables debug mode for the client
+func (c *Client) DisableDebug() {
+	c.debug = false
+}
+
 // PerformAnalysis performs an analysis using the standardized API
 func (c *Client) PerformAnalysis(req StandardAnalysisRequest) (*StandardAnalysisResponse, error) {
 	// Add workflow ID to request if provided
@@ -76,9 +86,9 @@ func (c *Client) PerformAnalysis(req StandardAnalysisRequest) (*StandardAnalysis
 		return nil, fmt.Errorf("error marshaling request: %w", err)
 	}
 
-	// Debug output
+	// Debug output - only print a summary of the request in debug mode
 	if c.debug {
-		fmt.Printf("API Request to /api/analysis:\n%s\n", string(reqBody))
+		fmt.Printf("API Request to %s/api/analysis (type: %s)\n", c.baseURL, req.AnalysisType)
 	}
 
 	// Create HTTP request
@@ -101,9 +111,9 @@ func (c *Client) PerformAnalysis(req StandardAnalysisRequest) (*StandardAnalysis
 		return nil, fmt.Errorf("error reading response: %w", err)
 	}
 
-	// Debug output
+	// Debug output - only print a brief summary in debug mode
 	if c.debug {
-		fmt.Printf("API Response from /api/analysis:\n%s\n", string(respBody))
+		fmt.Printf("API Response received from %s/api/analysis (status: %s)\n", c.baseURL, resp.Status)
 	}
 
 	// Check response status
